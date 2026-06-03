@@ -1,16 +1,18 @@
 DB_NAME=chocolate_doom
 DB_USER=postgres
 
-setup:
+reset:
 	psql -U $(DB_USER) -c "DROP DATABASE IF EXISTS $(DB_NAME);"
 	psql -U $(DB_USER) -c "CREATE DATABASE $(DB_NAME);"
-	psql -U $(DB_USER) -d $(DB_NAME) -f DDL.sql
-	psql -U $(DB_USER) -d $(DB_NAME) -f C3_views.sql
-	psql -U $(DB_USER) -d $(DB_NAME) -f parte2.sql
-	psql -U $(DB_USER) -d $(DB_NAME) -f parte3.sql
+
+load: reset
+	psql -U $(DB_USER) -d $(DB_NAME) -f "DDL proyecto(1).sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -f "C3_Views.sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -f "parte2_puntoB.sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -f "parte_3_puntoB.sql"
 
 views:
-	psql -U $(DB_USER) -d $(DB_NAME) -f C3_views.sql
+	psql -U $(DB_USER) -d $(DB_NAME) -f "C3_Views.sql"
 
 refresh:
 	psql -U $(DB_USER) -d $(DB_NAME) -c "REFRESH MATERIALIZED VIEW player_telemetry_summary;"
