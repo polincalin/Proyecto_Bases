@@ -11,8 +11,7 @@ INSERT INTO UXSubscale (subscale_id, instrument_id, name, code) VALUES
 (5, 1, 'Creative Freedom', 'CREA'),
 (6, 1, 'Audio Aesthetics', 'AUDI'),
 (7, 1, 'Personal Gratification', 'GRAT'),
-(8, 1, 'Social Connectivity', 'SOCI'),
-(9, 1, 'Visual Aesthetics', 'VISU');
+(8, 1, 'Visual Aesthetics', 'VISU');
  
 -- 3. Insertar los 18 ítems (2 por subescala)
 INSERT INTO UXItem (item_id, instrument_id, subscale_id, item_number, question_text, is_reverse_scored) VALUES 
@@ -43,10 +42,6 @@ INSERT INTO UXItem (item_id, instrument_id, subscale_id, item_number, question_t
 -- Personal Gratification
 (13, 1, 7, 13, 'I am very focused on my own performance while playing the game.', FALSE),
 (14, 1, 7, 14, 'I want to do as well as possible during the game.', FALSE),
- 
--- Social Connectivity (Clave para detectar cooperación/sabotaje)
-(15, 1, 8, 15, 'I find the game supports social interaction (e.g., chat) between players.', FALSE),
-(16, 1, 8, 16, 'I like to play this game with other players.', FALSE),
  
 -- Visual Aesthetics
 (17, 1, 9, 17, 'I enjoy the game''s graphics.', FALSE),
