@@ -8,6 +8,17 @@
 \usepackage{lmodern}
 \usepackage{graphicx}
 \usepackage{xcolor}
+\usepackage{minted}
+
+\setminted{
+    bgcolor=gray!6,
+    frame=lines,
+    framesep=4mm,
+    baselinestretch=1.1,
+    fontsize=\small,
+    linenos
+}
+\usepackage{xcolor}
 \usepackage[left=2.5cm, top=2.5cm, right=2.5cm]{geometry}
 \usepackage{minted}
 \usepackage{booktabs}
@@ -786,32 +797,544 @@ It is important to note that \textit{some} of the original queries seemed to ass
 So in order to design those queries, we extended the analysis by comparing spatial positions of different players across separate game sessions.
 
 
-\begin{enumerate}
-    \item Query : 
-    \begin{minted}{sql}
-    \end{minted}
+\subsection{Query 1: average session duration per map}
 
-     \item Query : 
-    \begin{minted}{sql}
-    \end{minted}
+This query computes the average duration of game participations per map.
 
-     \item Query : 
-    \begin{minted}{sql}
-    \end{minted}
+\begin{minted}{sql}
+SELECT
+m.map_id,
+m.map_code,
+e.name AS episodio,
+COUNT(*) AS sesiones,
+AVG(g.end_time - g.start_time) AS duracion_promedio
+FROM Game g
+JOIN Map m ON g.map_id = m.map_id
+JOIN Episode e ON m.episode_id = e.episode_id
+WHERE g.end_time IS NOT NULL
+GROUP BY m.map_id, m.map_code, e.name
+ORDER BY duracion_promedio DESC;
+\end{minted}
 
-     \item Query : 
-    \begin{minted}{sql}
-    \end{minted}
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+map code & episode & sessions & average duration \\
+\hline
+E1M1 & Knee-Deep in the Dead & 10 & 00:00:42.1 \\
+E2M1 & The Shores of Hell & 10 & 00:00:31.3 \\
+E3M1 & Inferno & 8 & 00:00:29.5 \\
+\hline
+\end{tabular}
+\caption{Average session duration by map}
+\end{table}
 
-     \item Query : 
-    \begin{minted}{sql}
-    \end{minted}
+\subsection{Query 2: players with the highest average proximity}
 
-     \item Query : 
-    \begin{minted}{sql}
-    \end{minted}
+\begin{minted}{sql}
+SELECT
+a.player_id AS jugador_a,
+b.player_id AS jugador_b,
+COUNT(*) AS tics_comparados,
+ROUND(AVG(sqrt(power(a.pos_x - b.pos_x, 2)
++ power(a.pos_y - b.pos_y, 2)))::numeric, 2) AS distancia_promedio
+FROM TelemetryEvent a
+JOIN TelemetryEvent b
+ON a.game_id = b.game_id
+AND a.tic = b.tic
+AND a.player_id < b.player_id
+GROUP BY a.player_id, b.player_id
+ORDER BY distancia_promedio ASC;
+\end{minted}
 
-\end{enumerate}
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+player A & player B & compared tics & avg. distance \\
+\hline
+3 & 4 & 1300 & 522.70 \\
+4 & 6 & 1200 & 904.71 \\
+2 & 4 & 1000 & 992.56 \\
+2 & 6 & 1800 & 1093.84 \\
+3 & 6 & 800 & 1165.15 \\
+\hline
+\end{tabular}
+\caption{Closest player pairs by average distance}
+\end{table}
+
+\subsection{Query 3: shortest and longest trajectory distances per player}
+
+\begin{minted}{sql}
+WITH pasos AS (
+SELECT
+game_id, player_id, tic, pos_x, pos_y,
+LAG(pos_x) OVER w AS px_prev,
+LAG(pos_y) OVER w AS py_prev
+FROM TelemetryEvent
+WINDOW w AS (PARTITION BY game_id, player_id ORDER BY tic)
+),
+dist_por_partida AS (
+SELECT
+game_id,
+player_id,
+SUM(sqrt(power(pos_x - px_prev, 2) + power(pos_y - py_prev, 2))) AS dist_total
+FROM pasos
+WHERE px_prev IS NOT NULL
+GROUP BY game_id, player_id
+)
+SELECT
+player_id,
+COUNT(*) AS partidas_jugadas,
+ROUND(MIN(dist_total)::numeric, 2) AS trayectoria_min,
+ROUND(MAX(dist_total)::numeric, 2) AS trayectoria_max
+FROM dist_por_partida
+GROUP BY player_id
+ORDER BY player_id;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+player & games & min distance & max distance \\
+\hline
+1 & 5 & 7587.75 & 17487.44 \\
+2 & 5 & 8448.40 & 15889.34 \\
+3 & 5 & 6060.07 & 11384.56 \\
+4 & 5 & 5843.17 & 8502.11 \\
+5 & 4 & 9838.55 & 18994.42 \\
+6 & 4 & 6488.90 & 14039.98 \\
+\hline
+\end{tabular}
+\caption{Minimum and maximum trajectory distance by player}
+\end{table}
+
+\subsection{Query 4: UX responses for players with above-average trajectory duration}
+
+\begin{minted}{sql}
+WITH duracion AS (
+SELECT player_id, COUNT(*) AS tics_totales
+FROM TelemetryEvent
+GROUP BY player_id
+),
+promedio AS (
+SELECT AVG(tics_totales) AS media_global FROM duracion
+)
+SELECT
+p.player_id,
+p.nickname,
+d.tics_totales,
+s.code AS subescala,
+ROUND(AVG(ri.score), 2) AS puntaje_promedio
+FROM duracion d
+CROSS JOIN promedio pr
+JOIN Player p ON p.player_id = d.player_id
+JOIN UXResponse r ON r.user_id = p.user_id
+JOIN UXResponseItem ri ON ri.response_id = r.response_id
+JOIN UXItem i ON i.item_id = ri.item_id
+JOIN UXSubscale s ON s.subscale_id = i.subscale_id
+WHERE d.tics_totales > pr.media_global
+GROUP BY p.player_id, p.nickname, d.tics_totales, s.code
+ORDER BY p.player_id, s.code;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\hline
+player & nickname & total tics \\
+\hline
+1 & Doomguy & 6000 \\
+2 & Ranger & 6300 \\
+3 & Crash & 5800 \\
+\hline
+\end{tabular}
+\caption{Players above the global average trajectory duration}
+\end{table}
+
+\subsection{Query 5: most visited sector per episode and map}
+
+\begin{minted}{sql}
+WITH conteo AS (
+SELECT
+e.episode_id,
+e.name AS episodio,
+m.map_id,
+m.map_code,
+t.sector_id,
+COUNT(*) AS visitas,
+ROW_NUMBER() OVER (
+PARTITION BY e.episode_id, m.map_id
+ORDER BY COUNT(*) DESC
+) AS rn
+FROM TelemetryEvent t
+JOIN Game g ON g.game_id = t.game_id AND g.player_id = t.player_id
+JOIN Map m ON m.map_id = g.map_id
+JOIN Episode e ON e.episode_id = m.episode_id
+WHERE t.sector_id IS NOT NULL
+GROUP BY e.episode_id, e.name, m.map_id, m.map_code, t.sector_id
+)
+SELECT episodio, map_code, sector_id AS sector_hotspot, visitas
+FROM conteo
+WHERE rn = 1
+ORDER BY episodio, map_code;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+\textbf{episode} & \textbf{map} & \textbf{hotspot sector} & \textbf{visits} \\
+\hline
+Inferno & E3M1 & 246 & 217 \\
+Knee-Deep in the Dead & E1M1 & 655 & 293 \\
+The Shores of Hell & E2M1 & 489 & 194 \\
+\hline
+\end{tabular}
+\caption{Most visited sector by episode and map}
+\end{table}
+
+\subsection{Query 6: number of tics where players were together in a sector}
+
+\begin{minted}{sql}
+SELECT
+a.game_id,
+a.player_id AS jugador_a,
+b.player_id AS jugador_b,
+COUNT(DISTINCT a.tic) AS tics_juntos
+FROM TelemetryEvent a
+JOIN TelemetryEvent b
+ON a.game_id = b.game_id
+AND a.tic = b.tic
+AND a.sector_id = b.sector_id
+AND a.player_id < b.player_id
+GROUP BY a.game_id, a.player_id, b.player_id
+ORDER BY tics_juntos DESC;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+game & player A & player B & tics together \\
+\hline
+12 & 4 & 6 & 69 \\
+3 & 2 & 6 & 63 \\
+4 & 3 & 4 & 60 \\
+\hline
+\end{tabular}
+\caption{Top co-presence results in the same sector}
+\end{table}\subsection{Query 1: average session duration per map}
+
+This query computes the average duration of game participations per map.
+
+\begin{minted}{sql}
+SELECT
+m.map_id,
+m.map_code,
+e.name AS episodio,
+COUNT(*) AS sesiones,
+AVG(g.end_time - g.start_time) AS duracion_promedio
+FROM Game g
+JOIN Map m ON g.map_id = m.map_id
+JOIN Episode e ON m.episode_id = e.episode_id
+WHERE g.end_time IS NOT NULL
+GROUP BY m.map_id, m.map_code, e.name
+ORDER BY duracion_promedio DESC;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+map code & episode & sessions & average duration \\
+\hline
+E1M1 & Knee-Deep in the Dead & 10 & 00:00:42.1 \\
+E2M1 & The Shores of Hell & 10 & 00:00:31.3 \\
+E3M1 & Inferno & 8 & 00:00:29.5 \\
+\hline
+\end{tabular}
+\caption{Average session duration by map}
+\end{table}
+
+\subsection{Query 2: players with the highest average proximity}
+
+\begin{minted}{sql}
+SELECT
+a.player_id AS jugador_a,
+b.player_id AS jugador_b,
+COUNT(*) AS tics_comparados,
+ROUND(AVG(sqrt(power(a.pos_x - b.pos_x, 2)
++ power(a.pos_y - b.pos_y, 2)))::numeric, 2) AS distancia_promedio
+FROM TelemetryEvent a
+JOIN TelemetryEvent b
+ON a.game_id = b.game_id
+AND a.tic = b.tic
+AND a.player_id < b.player_id
+GROUP BY a.player_id, b.player_id
+ORDER BY distancia_promedio ASC;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+player A & player B & compared tics & avg. distance \\
+\hline
+3 & 4 & 1300 & 522.70 \\
+4 & 6 & 1200 & 904.71 \\
+2 & 4 & 1000 & 992.56 \\
+2 & 6 & 1800 & 1093.84 \\
+3 & 6 & 800 & 1165.15 \\
+\hline
+\end{tabular}
+\caption{Closest player pairs by average distance}
+\end{table}
+
+\subsection{Query 3: shortest and longest trajectory distances per player}
+
+\begin{minted}{sql}
+WITH pasos AS (
+SELECT
+game_id, player_id, tic, pos_x, pos_y,
+LAG(pos_x) OVER w AS px_prev,
+LAG(pos_y) OVER w AS py_prev
+FROM TelemetryEvent
+WINDOW w AS (PARTITION BY game_id, player_id ORDER BY tic)
+),
+dist_por_partida AS (
+SELECT
+game_id,
+player_id,
+SUM(sqrt(power(pos_x - px_prev, 2) + power(pos_y - py_prev, 2))) AS dist_total
+FROM pasos
+WHERE px_prev IS NOT NULL
+GROUP BY game_id, player_id
+)
+SELECT
+player_id,
+COUNT(*) AS partidas_jugadas,
+ROUND(MIN(dist_total)::numeric, 2) AS trayectoria_min,
+ROUND(MAX(dist_total)::numeric, 2) AS trayectoria_max
+FROM dist_por_partida
+GROUP BY player_id
+ORDER BY player_id;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+player & games & min distance & max distance \\
+\hline
+1 & 5 & 7587.75 & 17487.44 \\
+2 & 5 & 8448.40 & 15889.34 \\
+3 & 5 & 6060.07 & 11384.56 \\
+4 & 5 & 5843.17 & 8502.11 \\
+5 & 4 & 9838.55 & 18994.42 \\
+6 & 4 & 6488.90 & 14039.98 \\
+\hline
+\end{tabular}
+\caption{Minimum and maximum trajectory distance by player}
+\end{table}
+
+\subsection{Query 4: UX responses for players with above-average trajectory duration}
+
+\begin{minted}{sql}
+WITH duracion AS (
+SELECT player_id, COUNT(*) AS tics_totales
+FROM TelemetryEvent
+GROUP BY player_id
+),
+promedio AS (
+SELECT AVG(tics_totales) AS media_global FROM duracion
+)
+SELECT
+p.player_id,
+p.nickname,
+d.tics_totales,
+s.code AS subescala,
+ROUND(AVG(ri.score), 2) AS puntaje_promedio
+FROM duracion d
+CROSS JOIN promedio pr
+JOIN Player p ON p.player_id = d.player_id
+JOIN UXResponse r ON r.user_id = p.user_id
+JOIN UXResponseItem ri ON ri.response_id = r.response_id
+JOIN UXItem i ON i.item_id = ri.item_id
+JOIN UXSubscale s ON s.subscale_id = i.subscale_id
+WHERE d.tics_totales > pr.media_global
+GROUP BY p.player_id, p.nickname, d.tics_totales, s.code
+ORDER BY p.player_id, s.code;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\hline
+player & nickname & total tics \\
+\hline
+1 & Doomguy & 6000 \\
+2 & Ranger & 6300 \\
+3 & Crash & 5800 \\
+\hline
+\end{tabular}
+\caption{Players above the global average trajectory duration}
+\end{table}
+
+\subsection{Query 5: most visited sector per episode and map}
+
+\begin{minted}{sql}
+WITH conteo AS (
+SELECT
+e.episode_id,
+e.name AS episodio,
+m.map_id,
+m.map_code,
+t.sector_id,
+COUNT(*) AS visitas,
+ROW_NUMBER() OVER (
+PARTITION BY e.episode_id, m.map_id
+ORDER BY COUNT(*) DESC
+) AS rn
+FROM TelemetryEvent t
+JOIN Game g ON g.game_id = t.game_id AND g.player_id = t.player_id
+JOIN Map m ON m.map_id = g.map_id
+JOIN Episode e ON e.episode_id = m.episode_id
+WHERE t.sector_id IS NOT NULL
+GROUP BY e.episode_id, e.name, m.map_id, m.map_code, t.sector_id
+)
+SELECT episodio, map_code, sector_id AS sector_hotspot, visitas
+FROM conteo
+WHERE rn = 1
+ORDER BY episodio, map_code;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+episode & map & hotspot sector & visits \\
+\hline
+Inferno & E3M1 & 246 & 217 \\
+Knee-Deep in the Dead & E1M1 & 655 & 293 \\
+The Shores of Hell & E2M1 & 489 & 194 \\
+\hline
+\end{tabular}
+\caption{Most visited sector by episode and map}
+\end{table}
+
+\subsection{Query 6: number of tics where players were together in a sector}
+
+\begin{minted}{sql}
+SELECT
+a.game_id,
+a.player_id AS jugador_a,
+b.player_id AS jugador_b,
+COUNT(DISTINCT a.tic) AS tics_juntos
+FROM TelemetryEvent a
+JOIN TelemetryEvent b
+ON a.game_id = b.game_id
+AND a.tic = b.tic
+AND a.sector_id = b.sector_id
+AND a.player_id < b.player_id
+GROUP BY a.game_id, a.player_id, b.player_id
+ORDER BY tics_juntos DESC;
+\end{minted}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\hline
+game & player A & player B & tics together \\
+\hline
+12 & 4 & 6 & 69 \\
+3 & 2 & 6 & 63 \\
+4 & 3 & 4 & 60 \\
+\hline
+\end{tabular}
+\caption{Top co-presence results in the same sector}
+\end{table}
+
+
+
+\section{Indexing and Performance Evaluation}
+
+\subsection{Important observation before indexing}
+
+The schema already creates implicit B-tree indexes for primary keys and unique constraints. In particular, the constraint \texttt{uq\_telem(game\_id, player\_id, tic)} automatically creates an index over those columns.
+
+Therefore, creating another index with the same columns would be redundant. The following indexes were selected to complement the existing ones.
+
+\subsection{Created indexes}
+
+\begin{minted}{sql}
+CREATE INDEX idx_telemetry_game_tic 
+ON TelemetryEvent(game_id, tic);
+
+CREATE INDEX idx_telemetry_sector 
+ON TelemetryEvent(sector_id);
+
+CREATE INDEX idx_game_player 
+ON Game(player_id);
+\end{minted}
+
+\subsection{Before/after evidence}
+
+\begin{center}
+\begin{tabular}{|l|l|l|l|}
+\hline
+\textbf{Index} & \textbf{Query} & \textbf{Buffers} & \textbf{Time / Plan} \\
+\hline
+idx\_telemetry\_sector & Filter by sector\_id = 655 & 493 → 3 & 2.07 ms → 0.069 ms (Seq → Index scan) \\
+\hline
+idx\_telemetry\_game\_tic & Query inside game\_id = 1 & 168 → 150 & 4.9 ms → 4.7 ms (slight improvement) \\
+\hline
+idx\_game\_player & Search player\_id = 3 & 1 → 1 & 0.02 ms → 0.02 ms (Seq scan remains) \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Discussion}
+
+\textbf{Sector index.} The strongest improvement was observed with the index \texttt{idx\_telemetry\_sector}. The query changed from a sequential scan over the entire table to an index scan. Buffer usage decreased significantly (from 493 to 3), and execution time improved from approximately 2.07 ms to 0.069 ms. This index is especially useful for filtering by sector and spatial analysis.
+
+\medskip
+
+\textbf{Game/tic index.} The index \texttt{idx\_telemetry\_game\_tic} showed only a small improvement. This is because the existing unique constraint \texttt{uq\_telem} already partially covers this access pattern. As a result, the impact is limited in the current dataset.
+
+\medskip
+
+\textbf{Player index on Game.} The index \texttt{idx\_game\_player} did not improve performance significantly because the \texttt{Game} table is small (only around 28 rows). PostgreSQL correctly uses a sequential scan in this case. However, this index is important for scalability and will be beneficial as the dataset grows.
+
+\section{Reproducibility mechanism}
+
+The system can be rebuilt using a Makefile. The scripts must be executed in a safe order: schema creation first, then UX metadata, master data, telemetry ingestion, and finally views and indexes.
+
+\begin{minted}{make}
+DB_NAME=chocolate_doom
+DB_USER=postgres
+PORT=5433
+
+reset:
+	psql -U $(DB_USER) -p $(PORT) -c "DROP DATABASE IF EXISTS $(DB_NAME);"
+	psql -U $(DB_USER) -p $(PORT) -c "CREATE DATABASE $(DB_NAME);"
+
+load: reset
+	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f ddl_corregido.sql
+	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f parte_3_puntoB_corregido.sql
+	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f populate_core.sql
+	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f parte2_puntoB.sql
+	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f C3_Views.sql
+	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f consultas_analiticas.sql
+	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f indices_evaluacion.sql
+
+refresh:
+	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -c 
+	"REFRESH MATERIALIZED VIEW player_telemetry_summary;"
+\end{minted}
+
 
 \clearpage
 \section{C.4 Reproducibility / Makefile}
