@@ -1,0 +1,897 @@
+{ }\documentclass{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, esint}
+\usepackage{wasysym}
+\usepackage{qrcode}
+\usepackage[colorlinks]{hyperref}
+\usepackage{lmodern}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[left=2.5cm, top=2.5cm, right=2.5cm]{geometry}
+\usepackage{minted}
+\usepackage{booktabs}
+\usepackage{svg}
+\usepackage{xcolor}
+\definecolor{LightGray}{gray}{0.975}
+\usepackage{xcolor}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\definecolor{MyPurple}{RGB}{120, 0, 180}
+\renewcommand{\arraystretch}{1.2}
+\setlength{\parindent}{0pt}
+
+\setlength{\parindent}{1pt}
+\setlength{\parskip}{3pt}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=MyPurple,
+  urlcolor=blue,
+  citecolor=MyPurple
+}
+\title{Databases \\ \textbf{Project : Designing a Telemetry and UX Database for \textit{Chocolate-Doom}}}
+\author{Fergie Lindsay Díaz, Juan Esteban Ortega, Juan Esteban, Federico Mejia}
+\date{today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\clearpage
+
+\section{Introduction and context} 
+
+This project is about designing and building a database to store and analyze data collected from a modified version of the game \textit{\textbf{Chocolate-Doom}}. The game records detailed information during gameplay, such as the player’s position, movement, and status at every moment. In addition to this, players also provide basic personal information and complete a user experience survey. 
+
+\medskip The main goal in the present report or document of this project is to organize all this data in a structured way so it can be stored, accessed, and analyzed efficiently. To do this, we will design a relational database that connects gameplay data with user and survey information. The database should be able to handle a large amount of data and ensure that everything is consistent and well organized. 
+
+\medskip Another important part of the project is to run queries that help us understand player behavior. For example, we will look at how each player moves, which sectors are more visited,
+and how individual trajectories develop during the game. We will also relate this information to their survey responses to see how their experience connects to their behavior. 
+
+\medskip Finally, we will follow good practices for data handling, including cleaning and loading the data properly, and considering basic privacy and ethical aspects. Overall, the project aims to combine database design with practical analysis of real gameplay data.
+
+
+
+\section{Assumptions and requirements}
+
+\subsection{Assumptions}
+\begin{itemize}
+  \item Each User is a real participant who has accepted consent before any data is collected.
+  \item A User can have one or more Player identities (nicknames), but each Player belongs to only one User.
+  \item Each Game represents one gameplay session with a start and end time.
+  \item Each Game is linked to exactly one Player.
+  \item Telemetry data is recorded at every tic (very frequent events) for each game session.
+  \item Each telemetry record is uniquely identified by (game\_id, tic).
+  \item Each Game is linked to exactly one Map and one Episode.
+  \item Maps are divided into Sectors, which help us analyze player positions.
+  \item Each user answers only one UX survey after playing.
+  \item Survey responses are completed after the game session and linked to the user.
+\end{itemize}
+
+
+\subsection{Functional requirements}
+
+\begin{itemize}
+  \item Store and manage user demographic information (age, gender, experience level, consent).
+  \item Support multiple player identities per user.
+  \item Record high-frequency gameplay telemetry including position, momentum, orientation, and combat stats.
+  \item Store game session metadata including player, episode, map, start time, and end time.
+  \item Support spatial grouping of telemetry data by map sectors.
+  \item Ingest raw telemetry logs (TSV format) into a structured relational database.
+  \item Store and manage UX survey instruments (PENS, GUESS, BANGS).
+  \item Store user responses to UX instruments at the question level.
+  \item Support analytical queries on movement, trajectories, and player behavior.
+  \item Support aggregation of telemetry data for trajectory and gameplay behavior analysis.
+\end{itemize}
+
+\subsection{Non-functional requirements}
+\begin{itemize}
+  \item The database should handle large telemetry datasets efficiently (at least 20,000 records, but ideally much more as data grows).
+  \item The schema should work well as the number of players, games, and telemetry records increases, without needing major changes.
+  \item Primary keys and foreign keys should be used to keep data consistent across all tables.
+  \item Indexes should be added to improve performance for common queries, especially those involving time sequences and spatial data.
+  \item The design should allow new telemetry fields or new UX instruments to be added without redesigning the whole database.
+  \item Data loading should be repeatable using a clear ETL process so the database can be rebuilt from raw logs if needed.
+  \item User data should be anonymized, and consent must be stored before any data is collected or used.
+  \item If some telemetry records are invalid or broken, they should be logged and skipped without stopping the whole ingestion process.
+\end{itemize}
+
+\section{Survey Election - GUESS}
+
+The survey we decided to work with and base our design on is Game User-Experience Satisfaction Scale \href{https://uxpajournal.org/wp-content/uploads/sites/7/pdf/JUS_Keebler_GUESS-18%20Scoring%20Guidelines.pdf}{\textbf{GUESS}}. 
+
+\subsection{What is it?}
+
+\medskip  The Game User Experience Satisfaction Scale (GUESS-18) is a survey used to understand how players feel about a video game. It has 18 questions that are divided into nine sections, and each one looks at a different part of the experience, like how easy the game is to use, how fun it is, how immersive it feels, or how good the visuals and audio are.
+
+\medskip  Each question is answered using a scale from 1 to 7, where players say how much they agree or disagree. At the end, the answers are grouped to get scores for each section and also a total score that shows the overall satisfaction. There is one question that is reverse scored (“I feel bored while playing the game”), so it needs to be handled a bit differently.
+
+\medskip  GUESS-18 is actually a shorter version of a longer survey with 55 questions, but this one is faster to complete and still gives good results.
+
+\subsection{Why did we chose it?}
+
+\medskip We chose GUESS-18 because it is easy to use and still gives a lot of useful information. It lets us measure different aspects of the player experience, not just if the game works, but also if it is fun, engaging, or interesting.
+
+\medskip Another reason is that it is a well-known and tested survey, so we can trust the results we get. This is important because we want to compare what players say with the data we collect from the game.
+
+\medskip It also fits nicely with our database design. Since the survey is divided into sections and questions, we can store everything in an organized way and later analyze things like enjoyment or immersion separately.
+
+\medskip Finally, it is short, so players can answer it quickly after playing. This makes it more likely that we get complete and honest responses.
+
+
+\section{Entity-Relation Diagram}
+
+The diagram organizes gameplay telemetry, user information, and survey responses into coherent relationships. It highlights how users are linked to players, how players are linked to individual game sessions, and how each session generates detailed telemetry data. It also integrates UX instruments to connect behavioral data with subjective user experience.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\linewidth]{imagen.png}
+    \caption{Entity-Relation Diagram}
+    \label{fig:placeholder}
+\end{figure}
+
+The diagram organizes gameplay telemetry, user information, and survey responses into coherent relationships. It highlights how users are linked to players, how players participate in game sessions, and how each session generates detailed telemetry data. It also integrates UX instruments to connect behavioral data with subjective user experience.
+
+
+
+\section{Relational Schema - Initial Draft}
+
+This section translates the conceptual ER model into a relational schema. It defines the entities, entities with attributes, and keys required to implement the database in a structured and normalized form. 
+
+\subsection{Entities}
+
+This subsection lists the core entities identified in the system. These represent the main objects stored in the database, including users, gameplay sessions, telemetry records, and UX survey components.
+
+\begin{itemize}
+    \item AppUser
+    \item Player
+    \item Game
+    \item TelemetryEvent
+    \item Episode
+    \item Map
+    \item Sector
+    \item UXInstrument
+    \item UXItem
+    \item UXResponse
+    \item UXResponseItem
+\end{itemize}
+
+\subsection{Foreign Keys}
+
+\smallskip
+The way in which we write or show the foreign keys will later help us in the way we can use it in SQL.
+
+\smallskip
+\textit{\textbf{Example}}:
+\begin{minted}{sql}
+          FOREIGN KEY (user_id) REFERENCES User(user_id)
+\end{minted}
+
+
+This subsection defines the relationships between tables using foreign keys. These constraints enforce referential integrity and ensure consistency across users, gameplay sessions, telemetry events, and UX responses.
+
+
+\clearpage
+\subsection{Data Dictionary}
+
+\subsubsection*{AppUser}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+\textbf{Attribute} & \textbf{Type} & \textbf{Constraints} & \textbf{Description} \\
+\hline
+user\_id & SERIAL & PK & Unique identifier for each user \\
+\hline
+age & INTEGER & CHECK (10--100) & Age of the participant \\
+\hline
+gender & VARCHAR(50) & --- & Self-reported gender \\
+\hline
+experience\_level & VARCHAR(50) & --- & Level of gaming experience \\
+\hline
+consent & BOOLEAN & NOT NULL, DEFAULT FALSE & Indicates informed consent for participation \\
+\hline
+\end{tabularx}
+
+\subsubsection*{Player}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+player\_id & SERIAL & PK & Unique identifier for each in-game player \\
+\hline
+user\_id & INTEGER & FK, NOT NULL & References AppUser(user\_id); links player to a user \\
+\hline
+nickname & VARCHAR(100) & NOT NULL & Player's in-game alias \\
+\hline
+\end{tabularx}
+
+\subsubsection*{Episode}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+episode\_id & SERIAL & PK & Unique episode identifier \\
+\hline
+name & VARCHAR(100) & NOT NULL & Name of the episode \\
+\hline
+\end{tabularx}
+
+\subsubsection*{Map}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+map\_id & SERIAL & PK & Unique map identifier \\
+\hline
+episode\_id & INTEGER & FK & References Episode(episode\_id) \\
+\hline
+map\_code & VARCHAR(50) & NOT NULL & Map code (e.g., E1M1) \\
+\hline
+\end{tabularx}
+
+\subsubsection*{Sector}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+sector\_id & SERIAL & PK & Unique sector identifier \\
+\hline
+map\_id & INTEGER & FK & References Map(map\_id) \\
+\hline
+grid\_x & INTEGER & --- & X-coordinate within the map grid \\
+\hline
+grid\_y & INTEGER & --- & Y-coordinate within the map grid \\
+\hline
+\end{tabularx}
+
+\subsubsection*{Game}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+game\_id & SERIAL & PK & Unique identifier for each game session \\
+\hline
+player\_id & INTEGER & FK & References Player(player id)\\
+\hline
+map\_id & INTEGER & FK & References Map(map\_id) \\
+\hline
+start\_time & TIMESTAMP & NOT NULL & Timestamp when the session started \\
+\hline
+end\_time & TIMESTAMP & --- & Timestamp when the session ended \\
+\hline
+\end{tabularx}
+
+\subsubsection*{TelemetryEvent}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+event\_id & BIGSERIAL & PK & Unique identifier for each telemetry record \\
+\hline
+game\_id & INTEGER & FK & References Game(game\_id) \\
+\hline
+player\_id & INTEGER & FK & References Player(player\_id) \\
+\hline
+sector\_id & INTEGER & FK & Nullable reference to Sector(sector\_id) \\
+\hline
+tic & INTEGER & NOT NULL & Discrete time unit (game tick) \\
+\hline
+pos\_x & DOUBLE PRECISION & NOT NULL & Player position on X-axis \\
+\hline
+pos\_y & DOUBLE PRECISION & NOT NULL & Player position on Y-axis \\
+\hline
+mom\_x & DOUBLE PRECISION & --- & Momentum on X-axis \\
+\hline
+mom\_y & DOUBLE PRECISION & --- & Momentum on Y-axis \\
+\hline
+angle & DOUBLE PRECISION & --- & Player orientation angle \\
+\hline
+fov & DOUBLE PRECISION & --- & Field of view \\
+\hline
+health & INTEGER & --- & Player health value \\
+\hline
+armor & INTEGER & --- & Player armor value \\
+\hline
+ammo & INTEGER & --- & Ammunition count \\
+\hline
+\end{tabularx}
+
+\textbf{Constraint:} UNIQUE (game\_id, tic)
+
+\subsubsection*{UXInstrument}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+instrument\_id & SERIAL & PK & Unique identifier for each UX instrument \\
+\hline
+name & VARCHAR(100) & NOT NULL & Name of the instrument (e.g., GUESS, PENS) \\
+\hline
+version & VARCHAR(50) & --- & Instrument version \\
+\hline
+scale\_min & INTEGER & --- & Minimum possible score \\
+\hline
+scale\_max & INTEGER & --- & Maximum possible score \\
+\hline
+\end{tabularx}
+
+\subsubsection*{UXSubscale}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+subscale\_id & SERIAL & PK & Unique identifier for each subscale \\
+\hline
+instrument\_id & INTEGER & FK & References UXInstrument(instrument\_id) \\
+\hline
+name & VARCHAR(100) & NOT NULL & Name of the subscale \\
+\hline
+code & VARCHAR(20) & --- & Short code identifier \\
+\hline
+\end{tabularx}
+
+\subsubsection*{UXItem}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+item\_id & SERIAL & PK & Unique identifier for each item/question \\
+\hline
+instrument\_id & INTEGER & FK & References UXInstrument(instrument\_id) \\
+\hline
+subscale\_id & INTEGER & FK & References UXSubscale(subscale\_id) \\
+\hline
+item\_number & INTEGER & NOT NULL & Item order within the instrument \\
+\hline
+question\_text & TEXT & NOT NULL & Text of the survey question \\
+\hline
+is\_reverse\_scored & BOOLEAN & DEFAULT FALSE & Indicates if reverse scoring is applied \\
+\hline
+\end{tabularx}
+
+\subsubsection*{UXResponse}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+response\_id & SERIAL & PK & Unique identifier for each survey response \\
+\hline
+user\_id & INTEGER & FK & References AppUser(user\_id) \\
+\hline
+instrument\_id & INTEGER & FK & References UXInstrument(instrument\_id) \\
+\hline
+responded\_at & TIMESTAMP & DEFAULT CURRENT\_TIMESTAMP & Date and time of submission \\
+\hline
+\end{tabularx}
+
+\subsubsection*{UXResponseItem}
+\begin{tabularx}{\linewidth}{|l|l|l|X|}
+\hline
+response\_id & INTEGER & PK, FK & References UXResponse(response\_id) \\
+\hline
+item\_id & INTEGER & PK, FK & References UXItem(item\_id) \\
+\hline
+score & INTEGER & CHECK ($\geq 0$) & Score given to the item \\
+\hline
+\end{tabularx}
+
+
+
+\clearpage
+\section{Data Definition Language (DDL)}
+
+\subsection{SQL Dictionary}
+
+\begin{itemize}
+  \item \href{https://www.geeksforgeeks.org/postgresql/postgresql-serial/}{\textbf{SERIAL - BIGSERIAL}}: Auto-increment numbers for IDs.  
+    \textit{Example:} In \texttt{AppUser}, \texttt{user\_id SERIAL PRIMARY KEY} gives each user a unique ID. In \texttt{TelemetryEvent}, \texttt{event\_id BIGSERIAL PRIMARY KEY} allows billions of events.
+
+  \item \href{https://www.w3schools.com/sql/sql_check.asp}{\textbf{CHECK}}: Rule that makes sure values are valid.  
+    \textit{Example:} In \texttt{AppUser}, \texttt{age INTEGER CHECK (age BETWEEN 10 AND 100)} only allows ages between 10 and 100. In \texttt{UXResponseItem}, \texttt{score INTEGER CHECK (score >= 0)} ensures scores are not negative.
+
+  \item \href{https://www.geeksforgeeks.org/sql/cascade-in-sql/}{\textbf{ON DELETE CASCADE}}: If a parent row is deleted, linked child rows are deleted too.  
+    \textit{Example:} If an \textit{AppUser} is deleted, their \textit{Player} record is also deleted. If a Game is deleted, all its \textit{TelemetryEvent} records are removed.
+
+  \item \href{https://www.w3resource.com/PostgreSQL/date-time-functions-and-operators.php}{\textbf{TIMESTAMP}}: Stores both date and time.  
+    \textit{Example:} In \texttt{Game}, \texttt{start\_time TIMESTAMP NOT NULL} records when the game started. In \texttt{UXResponse}, \texttt{responded\_at TIMESTAMP DEFAULT CURRENT\_TIMESTAMP} saves the time a user answered.
+
+  \item \href{https://www.postgresql.org/docs/current/datatype-numeric.html}{\textbf{PRECISION}}: Controls how exact numbers are stored.  
+    \textit{Example:} In \texttt{TelemetryEvent}, \texttt{pos\_x DOUBLE PRECISION} stores very detailed player positions, momentum, and angles.
+    
+  \item \href{https://www.postgresql.org/docs/current/ddl-constraints.html}{\textbf{ON DELETE SET NULL}}: If a parent row is deleted, the link is removed but the child row stays (foreign key becomes \texttt{NULL}).  
+    \textit{Example:} If a \texttt{Sector} is deleted, the \texttt{TelemetryEvent} still exists but its \texttt{sector\_id} becomes \texttt{NULL}. If a \texttt{UXSubscale} is deleted, the \texttt{UXItem} remains but loses its subscale link.
+\end{itemize}
+\subsection{1. AppUser}
+
+\begin{minted}{sql}
+CREATE TABLE AppUser (
+    user_id SERIAL PRIMARY KEY,
+    age INTEGER CHECK (age BETWEEN 10 AND 100),
+    gender VARCHAR(50),
+    experience_level VARCHAR(50),
+    consent BOOLEAN NOT NULL DEFAULT FALSE
+);
+\end{minted}
+
+\subsection{2. Player}
+
+\begin{minted}{sql}
+CREATE TABLE Player (
+    player_id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES AppUser(user_id) ON DELETE CASCADE,
+    nickname VARCHAR(100) NOT NULL
+);
+\end{minted}
+
+\subsection{3. Episode}
+
+\begin{minted}{sql}
+CREATE TABLE Episode (
+    episode_id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL
+);
+\end{minted}
+
+\subsection{4. Map}
+
+\begin{minted}{sql}
+CREATE TABLE Map (
+    map_id SERIAL PRIMARY KEY,
+    episode_id INTEGER REFERENCES Episode(episode_id) ON DELETE CASCADE,
+    map_code VARCHAR(50) NOT NULL
+);
+\end{minted}
+
+\subsection{5. Sector}
+
+\begin{minted}{sql}
+CREATE TABLE Sector (
+    sector_id SERIAL PRIMARY KEY,
+    map_id INTEGER REFERENCES Map(map_id) ON DELETE CASCADE,
+    grid_x INTEGER,
+    grid_y INTEGER
+);
+\end{minted}
+
+\subsection{6. Game}
+
+\begin{minted}{sql}
+CREATE TABLE Game (
+    game_id SERIAL PRIMARY KEY,
+    player_id INTEGER REFERENCES Player(player_id) ON DELETE CASCADE,
+    map_id INTEGER REFERENCES Map(map_id) ON DELETE CASCADE,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP
+);
+\end{minted}
+
+\subsection{7. TelemetryEvent}
+
+\begin{minted}{sql}
+CREATE TABLE TelemetryEvent (
+    event_id BIGSERIAL PRIMARY KEY,
+    game_id INTEGER REFERENCES Game(game_id) ON DELETE CASCADE,
+    sector_id INTEGER REFERENCES Sector(sector_id) ON DELETE SET NULL,
+    tic INTEGER NOT NULL,
+    pos_x DOUBLE PRECISION NOT NULL,
+    pos_y DOUBLE PRECISION NOT NULL,
+    mom_x DOUBLE PRECISION,
+    mom_y DOUBLE PRECISION,
+    angle DOUBLE PRECISION,
+    fov DOUBLE PRECISION,
+    health INTEGER,
+    armor INTEGER,
+    ammo INTEGER,
+    CONSTRAINT uq_telem UNIQUE (game_id, tic)
+);
+\end{minted}
+
+\subsection{8. UXInstrument}
+
+\begin{minted}{sql}
+CREATE TABLE UXInstrument (
+    instrument_id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    version VARCHAR(50),
+    scale_min INTEGER,
+    scale_max INTEGER
+);
+\end{minted}
+
+\subsection{9. UXSubscale}
+
+\begin{minted}{sql}
+CREATE TABLE UXSubscale (
+    subscale_id SERIAL PRIMARY KEY,
+    instrument_id INTEGER REFERENCES UXInstrument(instrument_id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    code VARCHAR(20)
+);
+\end{minted}
+
+\subsection{10. UXItem}
+
+\begin{minted}{sql}
+CREATE TABLE UXItem (
+    item_id SERIAL PRIMARY KEY,
+    instrument_id INTEGER REFERENCES UXInstrument(instrument_id) ON DELETE CASCADE,
+    subscale_id INTEGER REFERENCES UXSubscale(subscale_id) ON DELETE SET NULL,
+    item_number INTEGER NOT NULL,
+    question_text TEXT NOT NULL,
+    is_reverse_scored BOOLEAN DEFAULT FALSE
+);
+\end{minted}
+
+\subsection{11. UXResponse}
+
+\begin{minted}{sql}
+CREATE TABLE UXResponse (
+    response_id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES AppUser(user_id) ON DELETE CASCADE,
+    instrument_id INTEGER REFERENCES UXInstrument(instrument_id) ON DELETE CASCADE,
+    responded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+\end{minted}
+
+\subsection{12. UXResponseItem}
+
+\begin{minted}{sql}
+CREATE TABLE UXResponseItem (
+    response_id INTEGER REFERENCES UXResponse(response_id) ON DELETE CASCADE,
+    item_id INTEGER REFERENCES UXItem(item_id) ON DELETE CASCADE,
+    score INTEGER NOT NULL CHECK (score >= 0),
+    PRIMARY KEY (response_id, item_id)
+);
+\end{minted}
+
+\clearpage
+\section{SQL CODES}
+
+\subsection{parte2\_puntoB.sql}
+
+In this section, we explain how the telemetry data is loaded into the database.
+
+\smallskip
+First, the raw data from the TSV file is stored in the \textit{staging\_telemetry} table. In this table, all values are saved as text to make the loading process simple.
+
+\smallskip
+Then, we check for invalid records (for example, missing game, player, or tic information) and store them in the \textit{ingestion\_error\_log }table.
+
+\smallskip
+
+Finally, the valid data is cleaned, converted to the correct data types, and inserted into the \texttt{TelemetryEvent} table. Duplicate records are avoided, and empty values are handled properly.
+
+\begin{minted}{sql}
+-- 1. Crear tabla de Staging
+CREATE TABLE IF NOT EXISTS staging_telemetry (
+    game_id_raw      TEXT,
+    player_id_raw    TEXT,
+    sector_id_raw    TEXT,
+    tic_raw          TEXT,
+    pos_x_raw        TEXT,
+    pos_y_raw        TEXT,
+    mom_x_raw        TEXT,
+    mom_y_raw        TEXT,
+    angle_raw        TEXT,
+    fov_raw          TEXT,
+    health_raw       TEXT,
+    armor_raw        TEXT,
+    ammo_raw         TEXT
+);
+
+-- 2. Crear tabla de Log de Errores 
+CREATE TABLE IF NOT EXISTS ingestion_error_log (
+    error_id   SERIAL PRIMARY KEY,
+    game_id    TEXT,
+    tic        TEXT,
+    motivo     TEXT,
+    fecha_err  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3. Proceso ETL 
+INSERT INTO ingestion_error_log (game_id, tic, motivo)
+SELECT game_id_raw, tic_raw, 'Faltan IDs críticos o TIC'
+FROM staging_telemetry
+WHERE game_id_raw IS NULL OR player_id_raw IS NULL OR tic_raw IS NULL;
+
+INSERT INTO TelemetryEvent (
+    game_id, player_id, sector_id, tic, 
+    pos_x, pos_y, 
+    mom_x, mom_y, 
+    angle, fov, health, armor, ammo
+)
+SELECT DISTINCT ON (CAST(game_id_raw AS INT), CAST(player_id_raw AS INT), CAST(tic_raw AS INT))
+    CAST(game_id_raw AS INT),
+    CAST(player_id_raw AS INT),
+    CAST(NULLIF(sector_id_raw, '') AS INT),
+    CAST(tic_raw AS INT),
+    CAST(pos_x_raw AS DOUBLE PRECISION),
+    CAST(pos_y_raw AS DOUBLE PRECISION),
+    CAST(NULLIF(mom_x_raw, '') AS DOUBLE PRECISION),
+    CAST(NULLIF(mom_y_raw, '') AS DOUBLE PRECISION),
+    CAST(NULLIF(angle_raw, '') AS DOUBLE PRECISION),
+    CAST(NULLIF(fov_raw, '') AS DOUBLE PRECISION),
+    CAST(NULLIF(health_raw, '') AS INT),
+    CAST(NULLIF(armor_raw, '') AS INT),
+    CAST(NULLIF(ammo_raw, '') AS INT)
+FROM staging_telemetry
+WHERE game_id_raw IS NOT NULL 
+  AND player_id_raw IS NOT NULL 
+  AND tic_raw IS NOT NULL
+ORDER BY CAST(game_id_raw AS INT), CAST(player_id_raw AS INT), CAST(tic_raw AS INT);
+\end{minted}
+
+\clearpage
+\subsection{parte\_3\_puntoB.sql}
+
+In this section we insert the GUESS-18 survey structure into the database, including the instrument, its subscales, and all items.
+
+\medskip
+
+The field \texttt{is\_reverse\_scored} is used to indicate whether a question needs reverse scoring:
+
+\medskip
+\begin{itemize}
+    \item \textbf{TRUE:} The item is reverse scored. This means that higher values represent a negative response, so the score must be inverted during analysis.
+
+\medskip
+
+    \item \textbf{FALSE:} The item is not reverse scored. The values can be interpreted directly, where higher scores indicate a more positive experience.
+
+\end{itemize}
+
+
+The questionnaire is divided into subscales, which are groups of questions that measure different aspects of the player experience.
+
+Each subscale focuses on a specific category, such as :
+\begin{itemize}
+    \item \textbf{Usability/Playability} → how easy the game is to play
+    \item \textbf{Narratives} → story and engagement with the game's plot
+    \item \textbf{Play Engrossment} → level of immersion and focus during gameplay
+    \item \textbf{Enjoyment} → how fun the game feels
+    \item \textbf{Creative Freedom} → ability to be imaginative while playing
+    \item \textbf{Audio Aesthetics} → quality and impact of sound and music
+    \item \textbf{Personal Gratification} → focus on performance and achievement
+    \item \textbf{Visual Aesthetics} → visual quality and appeal of the game
+\end{itemize}
+
+This organization allows the analysis to evaluate different dimensions of the game experience separately, instead of treating all responses as a single score.
+
+In our implementation, the GUESS-18 survey is divided into nine subscales, each containing two items or questions.
+
+Each question (item) belongs to one subscale, allowing us to group responses and analyze different aspects of the player experience independently.
+
+Each subscale is stored in the \texttt{UXSubscale} table and is linked to its corresponding questions through the \texttt{UXItem} table. This structure allows efficient organization and analysis of survey data.
+
+\begin{itemize}
+    \item Subscale \textbf{=} Topic of analysis for the survey.
+    \item Item \textbf{=} Question
+\end{itemize}
+
+\clearpage
+\begin{minted}{sql}
+-- 1. Insertar el instrumento GUESS-18
+INSERT INTO UXInstrument (instrument_id, name, version, scale_min, scale_max) 
+VALUES (1, 'GUESS', '18-Item Short Scale', 1, 7);
+ 
+-- 2. Insertar las 9 Subescalas oficiales del GUESS-18
+INSERT INTO UXSubscale (subscale_id, instrument_id, name, code) VALUES 
+(1, 1, 'Usability/Playability', 'USAB'),
+(2, 1, 'Narratives', 'NARR'),
+(3, 1, 'Play Engrossment', 'ENGR'),
+(4, 1, 'Enjoyment', 'ENJO'),
+(5, 1, 'Creative Freedom', 'CREA'),
+(6, 1, 'Audio Aesthetics', 'AUDI'),
+(7, 1, 'Personal Gratification', 'GRAT'),
+(8, 1, 'Visual Aesthetics', 'VISU');
+ 
+-- 3. Insertar los 18 ítems (2 por subescala)
+INSERT INTO UXItem (item_id, instrument_id, subscale_id, item_number, question_text, is_reverse_scored) VALUES 
+-- Usability/Playability
+(1, 1, 1, 1, 'I find the controls of the game to be straightforward.', FALSE),
+(2, 1, 1, 2, 'I find the game''s interface to be easy to navigate.', FALSE),
+ 
+-- Narratives
+(3, 1, 2, 3, 'I am captivated by the game''s story from the beginning.', FALSE),
+(4, 1, 2, 4, 'I enjoy the fantasy or story provided by the game.', FALSE),
+ 
+-- Play Engrossment
+(5, 1, 3, 5, 'I feel detached from the outside world while playing the game.', FALSE),
+(6, 1, 3, 6, 'I do not care to check events that are happening in the real world during the game.', FALSE),
+ 
+-- Enjoyment
+(7, 1, 4, 7, 'I think the game is fun.', FALSE),
+(8, 1, 4, 8, 'I feel bored while playing the game.', TRUE),
+ 
+-- Creative Freedom
+(9, 1, 5, 9, 'I feel the game allows me to be imaginative.', FALSE),
+(10, 1, 5, 10, 'I feel creative while playing the game.', FALSE),
+ 
+-- Audio Aesthetics
+(11, 1, 6, 11, 'I enjoy the sound effects in the game.', FALSE),
+(12, 1, 6, 12, 'I feel the game''s audio (e.g., sound effects, music) enhances my gaming experience.', FALSE),
+ 
+-- Personal Gratification
+(13, 1, 7, 13, 'I am very focused on my own performance while playing the game.', FALSE),
+(14, 1, 7, 14, 'I want to do as well as possible during the game.', FALSE),
+ 
+-- Visual Aesthetics
+(17, 1, 9, 17, 'I enjoy the game''s graphics.', FALSE),
+(18, 1, 9, 18, 'I think the game is visually appealing.', FALSE);
+ 
+-- Resincronizar las secuencias en PostgreSQL para futuros INSERTS
+SELECT setval('uxinstrument_instrument_id_seq', (SELECT MAX(instrument_id) FROM UXInstrument));
+SELECT setval('uxsubscale_subscale_id_seq', (SELECT MAX(subscale_id) FROM UXSubscale));
+SELECT setval('uxitem_item_id_seq', (SELECT MAX(item_id) FROM UXItem));
+ 
+\end{minted}
+
+\section{C.3 Views and Materialized View}
+This section defines SQL views and a materialized view used to support frequent analytical queries over gameplay and telemetry data. These structures simplify complex queries and improve performance for repeated analyses.
+
+\subsection{View 1: Player Game Summary}
+
+\begin{minted}{sql}
+CREATE VIEW player_game_summary AS
+SELECT
+    p.player_id,
+    p.nickname,
+    COUNT(g.game_id) AS total_games,
+    MIN(g.start_time) AS first_game,
+    MAX(g.end_time) AS last_game
+FROM Player p
+JOIN Game g ON p.player_id = g.player_id
+GROUP BY p.player_id, p.nickname;
+\end{minted}
+
+This view summarizes the activity of each player by counting the number of games played and showing their first and last recorded sessions.
+
+\bigskip
+
+\subsection{View 2: Map and Episode Activity Summary}
+
+\begin{minted}{sql}
+CREATE VIEW map_activity_summary AS
+SELECT
+    e.episode_id,
+    e.name AS episode_name,
+    m.map_id,
+    m.map_code,
+    COUNT(g.game_id) AS total_games
+FROM Episode e
+JOIN Map m ON e.episode_id = m.episode_id
+JOIN Game g ON m.map_id = g.map_id
+GROUP BY e.episode_id, e.name, m.map_id, m.map_code;
+\end{minted}
+
+This view provides a summary of gameplay activity per map and episode, allowing analysis of which levels are most frequently played.
+
+\bigskip
+
+\subsection{Materialized View: Player Telemetry Summary}
+
+\begin{minted}{sql}
+CREATE MATERIALIZED VIEW player_telemetry_summary AS
+SELECT
+    g.game_id,
+    g.player_id,
+    COUNT(t.event_id) AS total_events,
+    AVG(t.pos_x) AS avg_pos_x,
+    AVG(t.pos_y) AS avg_pos_y,
+    AVG(t.health) FILTER (WHERE t.health IS NOT NULL) AS avg_health,
+    AVG(t.ammo) FILTER (WHERE t.ammo IS NOT NULL) AS avg_ammo
+FROM Game g
+JOIN TelemetryEvent t ON g.game_id = t.game_id
+GROUP BY g.game_id, g.player_id;
+\end{minted}
+
+This materialized view precomputes aggregated telemetry statistics per game session. Since telemetry data is large and frequently queried, storing pre-aggregated results improves performance significantly.
+
+A materialized view is used instead of a regular view because regular views execute the query every time they are called. In contrast, the materialized view saves the results, making access faster. However, this comes with the limitation that the data must be manually refreshed whenever new telemetry data is added.
+
+\subsection{Refreshing the Materialized View}
+
+\begin{minted}{sql}
+REFRESH MATERIALIZED VIEW player_telemetry_summary;
+\end{minted}
+
+This command is used to update the materialized view when new telemetry data is inserted into the database.
+\clearpage
+\section{Queries}
+
+In this section, we present the six analytical queries selected from the eight proposed in the project description. These queries were adapted to fit our specific database schema and the characteristics of the collected gameplay data.
+
+It is important to note that \textit{some} of the original queries seemed to assume a multiplayer environment, which could lead to misinterpretation, since Chocolate-Doom is strictly a single-player game. 
+So in order to design those queries, we extended the analysis by comparing spatial positions of different players across separate game sessions.
+
+
+\begin{enumerate}
+    \item Query : 
+    \begin{minted}{sql}
+    \end{minted}
+
+     \item Query : 
+    \begin{minted}{sql}
+    \end{minted}
+
+     \item Query : 
+    \begin{minted}{sql}
+    \end{minted}
+
+     \item Query : 
+    \begin{minted}{sql}
+    \end{minted}
+
+     \item Query : 
+    \begin{minted}{sql}
+    \end{minted}
+
+     \item Query : 
+    \begin{minted}{sql}
+    \end{minted}
+
+\end{enumerate}
+
+\clearpage
+\section{C.4 Reproducibility / Makefile}
+
+To ensure full reproducibility of the database, we provide a \texttt{Makefile} that automates the process of resetting and rebuilding the entire system from scratch. This guarantees that the database can be recreated consistently using only the SQL scripts included in the repository.
+
+\subsection{Makefile}
+
+\begin{minted}{make}
+DB_NAME=chocolate_doom
+DB_USER=postgres
+
+reset:
+	psql -U $(DB_USER) -c "DROP DATABASE IF EXISTS $(DB_NAME);"
+	psql -U $(DB_USER) -c "CREATE DATABASE $(DB_NAME);"
+
+load: reset
+	psql -U $(DB_USER) -d $(DB_NAME) -f "DDL proyecto(1).sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -f "C3_Views.sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -f "parte2_puntoB.sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -f "parte_3_puntoB.sql"
+
+views:
+	psql -U $(DB_USER) -d $(DB_NAME) -f "C3_Views.sql"
+
+refresh:
+	psql -U $(DB_USER) -d $(DB_NAME) -c "REFRESH MATERIALIZED VIEW player_telemetry_summary;"
+
+test:
+	psql -U $(DB_USER) -d $(DB_NAME) -c "SELECT * FROM player_game_summary LIMIT 5;"
+	psql -U $(DB_USER) -d $(DB_NAME) -c "SELECT * FROM map_activity_summary LIMIT 5;"
+\end{minted}
+
+\subsection{Explanation of Makefile targets}
+
+\begin{itemize}
+    \item \textbf{reset: }  
+
+Drops the existing database (if it exists) and creates a fresh empty database. This ensures a clean starting point for reproducibility.
+
+\medskip
+    \item \textbf{load: }  
+
+Fully rebuilds the database from scratch. It first calls \texttt{reset}, then executes all SQL scripts in the correct order:
+\begin{itemize}
+    \item DDL script (schema creation)
+    \item Views and materialized view definitions (C.3)
+    \item ETL ingestion process (Part 2)
+    \item UX survey data insertion (Part 3)
+\end{itemize}
+
+\medskip
+    \item \textbf{views :}  
+
+Creates only the SQL views and materialized views defined in C.3 without resetting the database. Useful for updating analytical structures independently.
+
+\medskip
+    \item \textbf{refresh :}  
+
+Refreshes the materialized view \texttt{player\_telemetry\_summary}, recomputing aggregated telemetry statistics after new data is inserted.
+
+\medskip
+    \item \textbf{test :}  
+
+Runs sample validation queries to quickly check that the database was built correctly and that the main analytical views return results.
+
+\end{itemize}
+\subsection{Purpose}
+
+This automation allows the database to be fully rebuilt with a single command, without manual steps. It ensures that the setup process is consistent and repeatable, reduces the risk of errors, and makes it easier to reproduce the system in different environments.
+
+\section{Conclusions}
+\medskip In this project, we designed and implemented a relational database to store gameplay telemetry together with user information and UX survey data. The schema follows a structured approach that separates core entities such as users, games, telemetry events, and survey responses, making the system organized and scalable.
+
+\medskip One important result is that we can connect player behavior with their subjective experience. By linking telemetry data with survey responses, we can analyze not only how players move in the game, but also how they feel about it. This allows a more complete analysis, for example comparing engagement with movement patterns and activity within the game. Additionally, even though the game is single-player, we extended the analysis to compare spatial behavior across different players.
+
+\medskip We also considered how the data is loaded into the system. By using an ETL approach, we can take raw telemetry logs, clean them, and insert them into the database in a consistent way. This ensures the data is reliable and can be reused if we need to reload everything. The use of staging tables and error logging helps maintain data quality during ingestion.
+
+\medskip Additionally, the use of primary keys, foreign keys, and indexes helps maintain data integrity and improves performance when running analytical queries. This is important because telemetry data grows very fast and queries need to be efficient. Views and materialized views were also implemented to simplify queries and improve performance for frequent analyses.
+
+\medskip Overall, this project shows how a relational database can be used not only to store large amounts of data, but also to support meaningful analysis of gameplay behavior and user experience through real telemetry data and analytical queries.
+
+\end{document}
