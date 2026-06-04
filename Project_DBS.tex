@@ -586,7 +586,7 @@ INSERT INTO UXSubscale (subscale_id, instrument_id, name, code) VALUES
 (7, 1, 'Personal Gratification', 'GRAT'),
 (8, 1, 'Visual Aesthetics', 'VISU');
  
--- 3. Insertar los 16 ítems (2 por subescala)
+-- 3. Insertar los 16 items (2 por subescala)
 INSERT INTO UXItem (item_id, instrument_id, subscale_id, item_number, question_text, is_reverse_scored) VALUES 
 -- Usability/Playability
 (1, 1, 1, 1, 'I find the controls of the game to be straightforward.', FALSE),
@@ -610,15 +610,15 @@ INSERT INTO UXItem (item_id, instrument_id, subscale_id, item_number, question_t
  
 -- Audio Aesthetics
 (11, 1, 6, 11, 'I enjoy the sound effects in the game.', FALSE),
-(12, 1, 6, 12, 'I feel the game''s audio (e.g., sound effects, music) enhances my gaming experience.', FALSE),
+(12, 1, 6, 12, 'I feel the game''s audio enhances my gaming experience.', FALSE),
  
 -- Personal Gratification
 (13, 1, 7, 13, 'I am very focused on my own performance while playing the game.', FALSE),
 (14, 1, 7, 14, 'I want to do as well as possible during the game.', FALSE),
  
 -- Visual Aesthetics
-(17, 1, 9, 17, 'I enjoy the game''s graphics.', FALSE),
-(18, 1, 9, 18, 'I think the game is visually appealing.', FALSE);
+(15, 1, 8, 15, 'I enjoy the game''s graphics.', FALSE),
+(16, 1, 8, 16, 'I think the game is visually appealing.', FALSE);
  
 -- Resincronizar las secuencias en PostgreSQL para futuros INSERTS
 SELECT setval('uxinstrument_instrument_id_seq', (SELECT MAX(instrument_id) FROM UXInstrument));
@@ -702,7 +702,9 @@ This command is used to update the materialized view when new telemetry data is 
 This section presents six analytical queries selected from the project brief. They were adapted to the corrected schema, where a shared session is represented by \texttt{game\_id} and each player participation is represented by \texttt{(game\_id, player\_id)}.
 
 \subsection{Query 1: average session duration per map}
-This query computes the average duration of game participations per map.
+This query groups games by map and calculates how long each session lasts using the start and end times. Then, it computes the average duration for each map.
+
+Combines the tables \texttt{Game}, \texttt{Map}, and \texttt{Episode} using \texttt{JOIN}, so each game session is linked to its map and episode. The \texttt{WHERE} clause keeps only finished sessions (those with \texttt{end\_time}). Then, \texttt{GROUP BY} organizes the data per map, and aggregate functions like \texttt{COUNT} and \texttt{AVG} are used to calculate how many sessions there are and their average duration.
 
 \begin{lstlisting}[style=sqlstyle]
 SELECT
@@ -733,23 +735,31 @@ E3M1 & Inferno & 8 & 00:00:29.5 \\
 \caption{Average session duration by map.}
 \end{table}
 
-\textbf{Interpretation.} This query identifies which maps tend to generate longer gameplay sessions. Longer average durations may indicate higher engagement, greater map complexity, or larger exploration requirements.
+\textbf{Interpretation.} This helps us see which maps tend to keep players playing for longer. For example, a map with longer sessions might be more engaging or take more time to complete.
 
 \clearpage
 \subsection{Query 2: players with the highest average proximity}
-A self-join compares players at the same \texttt{game\_id} and \texttt{tic}. A lower average Euclidean distance indicates greater proximity.
+This query compares players by looking at their positions at the same \textit{tic}, even if they played in different sessions. It calculates the average distance between them.
+
+This query compares players using a self-join, (\texttt{TelemetryEvent} joined with itself). 
+The condition \texttt{a.tic = b.tic} matches positions at the same moment in time, and \texttt{a.player\_id < b.player\_id} avoids duplicating pairs. The distance between positions is calculated using \texttt{sqrt} and \texttt{power}, and then averaged using \texttt{AVG}. Finally, the results are grouped by pairs of players.
 
 \begin{lstlisting}[style=sqlstyle]
 SELECT
     a.player_id AS jugador_a,
     b.player_id AS jugador_b,
     COUNT(*) AS tics_comparados,
-    ROUND(AVG(sqrt(power(a.pos_x - b.pos_x, 2)
-                 + power(a.pos_y - b.pos_y, 2)))::numeric, 2) AS distancia_promedio
+    ROUND(
+        AVG(
+            sqrt(
+                power(a.pos_x - b.pos_x, 2) +
+                power(a.pos_y - b.pos_y, 2)
+            )
+        )::numeric, 2
+    ) AS distancia_promedio
 FROM TelemetryEvent a
 JOIN TelemetryEvent b
-  ON a.game_id = b.game_id
- AND a.tic = b.tic
+  ON a.tic = b.tic
  AND a.player_id < b.player_id
 GROUP BY a.player_id, b.player_id
 ORDER BY distancia_promedio ASC;
@@ -771,26 +781,36 @@ ORDER BY distancia_promedio ASC;
 \caption{Closest player pairs by average distance.}
 \end{table}
 
-\textbf{Interpretation.} Player pairs with lower average Euclidean distance tend to remain physically closer during gameplay. This may indicate cooperation, coordinated movement, or shared objectives.
+\textbf{Interpretation.} Since the game is single-player, this does not represent real interaction. Instead, we imagine all players moving at the same time.
+
+If the average distance is small, it means players tend to follow similar paths in the game.
 
 \clearpage
 \subsection{Query 3: shortest and longest trajectory distances per player}
-This query uses \texttt{LAG()} to calculate step-by-step distance between consecutive tics, then aggregates trajectory length by player. Using a window function provides a clearer solution than repeatedly self-joining the table.
+This query uses a window function called \texttt{LAG()} to access the previous position of a player. The data is partitioned by \texttt{game\_id} and \texttt{player\_id}, so each player’s movement is analyzed within their own session. Then, the distance between consecutive positions is calculated and summed using \texttt{SUM}. Finally, \texttt{GROUP BY} is used to compute the minimum and maximum trajectory distance per player.
 
 \begin{lstlisting}[style=sqlstyle]
 WITH pasos AS (
     SELECT
-        game_id, player_id, tic, pos_x, pos_y,
-        LAG(pos_x) OVER w AS px_prev,
-        LAG(pos_y) OVER w AS py_prev
+        game_id,
+        player_id,
+        tic,
+        pos_x,
+        pos_y,
+        LAG(pos_x) OVER (PARTITION BY game_id, player_id ORDER BY tic) AS px_prev,
+        LAG(pos_y) OVER (PARTITION BY game_id, player_id ORDER BY tic) AS py_prev
     FROM TelemetryEvent
-    WINDOW w AS (PARTITION BY game_id, player_id ORDER BY tic)
 ),
 dist_por_partida AS (
     SELECT
         game_id,
         player_id,
-        SUM(sqrt(power(pos_x - px_prev, 2) + power(pos_y - py_prev, 2))) AS dist_total
+        SUM(
+            sqrt(
+                power(pos_x - px_prev, 2) +
+                power(pos_y - py_prev, 2)
+            )
+        ) AS dist_total
     FROM pasos
     WHERE px_prev IS NOT NULL
     GROUP BY game_id, player_id
@@ -826,11 +846,14 @@ ORDER BY player_id;
 
 \clearpage
 \subsection{Query 4: UX responses for players with above-average trajectory duration}
-Trajectory duration is measured as the number of telemetry tics per player. The global average is 5,750 tics. Players 1, 2, and 3 are above that average, so their UX scores are grouped by subscale.
+This query uses two common table expressions (CTEs). The first one counts how many tics each player has using \texttt{COUNT}. The second calculates the global average using \texttt{AVG}. Then, the query selects players above the average and joins several tables (\texttt{Player}, \texttt{UXResponse}, \texttt{UXItem}, and \texttt{UXSubscale}). Finally, it calculates the average score per subscale using \texttt{AVG}.
 
 \begin{lstlisting}[style=sqlstyle]
+\begin{lstlisting}[style=sqlstyle]
 WITH duracion AS (
-    SELECT player_id, COUNT(*) AS tics_totales
+    SELECT
+        player_id,
+        COUNT(*) AS tics_totales
     FROM TelemetryEvent
     GROUP BY player_id
 ),
@@ -873,8 +896,9 @@ ORDER BY p.player_id, s.code;
 
 \clearpage
 \subsection{Query 5: most visited sector per episode and map}
-This query counts visits by episode, map, and sector, then uses \texttt{ROW\_NUMBER()} to keep the most visited sector per map.
+This query counts how many times each sector is visited using \texttt{COUNT(*)}. The data is grouped by episode, map, and sector. Then, the window function \texttt{ROW\_NUMBER()} is used to rank sectors based on the number of visits within each map. Finally, only the top-ranked sector (the most visited one) is selected.
 
+\begin{lstlisting}[style=sqlstyle]
 \begin{lstlisting}[style=sqlstyle]
 WITH conteo AS (
     SELECT
@@ -889,13 +913,19 @@ WITH conteo AS (
             ORDER BY COUNT(*) DESC
         ) AS rn
     FROM TelemetryEvent t
-    JOIN Game g    ON g.game_id = t.game_id AND g.player_id = t.player_id
+    JOIN Game g
+      ON g.game_id = t.game_id
+     AND g.player_id = t.player_id
     JOIN Map m     ON m.map_id = g.map_id
     JOIN Episode e ON e.episode_id = m.episode_id
     WHERE t.sector_id IS NOT NULL
     GROUP BY e.episode_id, e.name, m.map_id, m.map_code, t.sector_id
 )
-SELECT episodio, map_code, sector_id AS sector_hotspot, visitas
+SELECT
+    episodio,
+    map_code,
+    sector_id AS sector_hotspot,
+    visitas
 FROM conteo
 WHERE rn = 1
 ORDER BY episodio, map_code;
@@ -919,21 +949,19 @@ The Shores of Hell & E2M1 & 489 & 194 \\
 
 \clearpage
 \subsection{Query 6: number of tics where players were together in a sector}
-A self-join matches rows with the same \texttt{game\_id}, \texttt{tic}, and \texttt{sector\_id}, but different players. The result counts how many tics each pair shared in the same sector.
+This query compares players by checking when they are in the same sector at the same tic, even across different sessions.
 
 \begin{lstlisting}[style=sqlstyle]
 SELECT
-    a.game_id,
     a.player_id AS jugador_a,
     b.player_id AS jugador_b,
     COUNT(DISTINCT a.tic) AS tics_juntos
 FROM TelemetryEvent a
 JOIN TelemetryEvent b
-  ON a.game_id = b.game_id
- AND a.tic = b.tic
+  ON a.tic = b.tic
  AND a.sector_id = b.sector_id
  AND a.player_id < b.player_id
-GROUP BY a.game_id, a.player_id, b.player_id
+GROUP BY a.player_id, b.player_id
 ORDER BY tics_juntos DESC;
 \end{lstlisting}
 
@@ -951,7 +979,9 @@ ORDER BY tics_juntos DESC;
 \caption{Top co-presence results in the same sector.}
 \end{table}
 
-\textbf{Interpretation.} Co-presence measurements estimate how often players occupy the same sector simultaneously. High values may indicate collaboration, escort behavior, or repeated encounters.
+\textbf{Interpretation.} Since the game is single-player, this does not represent real interaction. Instead, we imagine all players playing at the same time.
+
+Higher values mean players tend to visit the same areas at similar moments in the game.
 
 \section{Indexing and performance evaluation}
 \subsection{Important observation before indexing}
@@ -1002,7 +1032,7 @@ CREATE INDEX idx_game_player ON Game(player_id);
 
 \section{C.4 Reproducibility mechanism - Makefile}
 
-To ensure full reproducibility of the database, we provide a \texttt{Makefile} that automates the process of resetting and rebuilding the entire system from scratch. This guarantees that the database can be recreated consistently using only the SQL scripts included in the repository.
+To ensure full reproducibility of the database, we provide a \texttt{Makefile} that automates the process of resetting and rebuilding the entire system from scratch. This guarantees that the database can be recreated consistently using only the SQL scripts and data files included in the repository.
 
 \subsection{Makefile}
 
@@ -1015,17 +1045,32 @@ To ensure full reproducibility of the database, we provide a \texttt{Makefile} t
 DB_NAME=chocolate_doom
 DB_USER=postgres
 
+.PHONY: reset generate load views refresh analytics indexes test
+
 reset:
 	psql -U $(DB_USER) -c "DROP DATABASE IF EXISTS $(DB_NAME);"
 	psql -U $(DB_USER) -c "CREATE DATABASE $(DB_NAME);"
 
-load: reset
+generate:
+	python procesar.py Telemetry.tsv \
+		--game-id 1 \
+		--player-id 1 \
+		--map-id 1 \
+		--output telemetry.tsv
+
+load: reset generate
 	psql -U $(DB_USER) -d $(DB_NAME) -f "DDL proyecto(1).sql"
-	psql -U $(DB_USER) -d $(DB_NAME) -c "\copy TelemetryEvent(game_id, player_id, sector_id, tic, pos_x, pos_y, mom_x, mom_y, angle, fov, health, armor, ammo) FROM 'telemetry.tsv' WITH (FORMAT csv, DELIMITER E'\t', HEADER true);"
-	psql -U $(DB_USER) -d $(DB_NAME) -f "C3_Views.sql"
+
 	psql -U $(DB_USER) -d $(DB_NAME) -f "parte2_puntoB.sql"
+
+	psql -U $(DB_USER) -d $(DB_NAME) -c "\copy staging_telemetry FROM 'telemetry.tsv' WITH (FORMAT csv, DELIMITER E'\t', HEADER true);"
+
 	psql -U $(DB_USER) -d $(DB_NAME) -f "parte_3_puntoB.sql"
+
+	psql -U $(DB_USER) -d $(DB_NAME) -f "C3_Views.sql"
+
 	psql -U $(DB_USER) -d $(DB_NAME) -f "consultas_analiticas.sql"
+
 	psql -U $(DB_USER) -d $(DB_NAME) -f "indices_evaluacion.sql"
 
 views:
@@ -1054,51 +1099,62 @@ test:
 
     \medskip
 
+    \item \textbf{generate: }  
+    This target executes the Python preprocessing script (\texttt{procesar.py}), which transforms the raw telemetry file (\texttt{Telemetry.tsv}) into a cleaned and structured TSV file (\texttt{telemetry.tsv}). The script also assigns metadata such as \texttt{game\_id}, \texttt{player\_id}, and \texttt{map\_id}, and computes derived fields such as sector assignment.
+
+    \medskip
+
     \item \textbf{load: }  
-    This is the main orchestration target responsible for fully rebuilding the system from scratch. It first executes \texttt{reset} and then runs all required scripts in a strict dependency order to ensure correctness and referential integrity:
-    
+    This is the main orchestration target responsible for fully rebuilding the system from scratch. It first executes \texttt{reset} and \texttt{generate}, and then runs all required SQL scripts in a strict order:
+
     \begin{itemize}
         \item The \textbf{DDL script}, which defines the complete database schema (tables, constraints, and relationships).
-        \item The \textbf{TSV ingestion step}, which loads raw telemetry data into the \texttt{TelemetryEvent} table using PostgreSQL's \texttt{\textbackslash copy} mechanism.
-        \item The \textbf{C.3 views script}, which creates analytical views and materialized views used for reporting and aggregation.
-        \item The \textbf{application logic scripts} (Part 2 and Part 3), which may include additional transformations, constraints, or data processing logic.
-        \item The \textbf{analytical queries script}, which defines complex queries used for evaluation and insights extraction.
-        \item The \textbf{index evaluation script}, which creates and tests indexes to improve query performance and demonstrates optimization effects.
+        \item The \textbf{ETL script (Part 2)}, which processes and validates staging data before insertion into the final tables.
+        \item The \textbf{staging load step}, which imports the processed TSV file into \texttt{staging\_telemetry} using PostgreSQL's \texttt{\textbackslash copy} mechanism.
+        \item The \textbf{UX data script (Part 3)}, which inserts the GUESS-18 instrument structure and survey data.
+        \item The \textbf{C.3 views script}, which creates analytical views and materialized views for reporting.
+        \item The \textbf{analytical queries script}, which defines queries used for evaluation and insights extraction.
+        \item The \textbf{index evaluation script}, which creates and evaluates indexes for performance analysis.
     \end{itemize}
 
-    This strict ordering ensures that each layer of the system is built on top of a correctly initialized foundation.
+    This ordering ensures that all dependencies are satisfied before higher-level analytical structures are built.
 
     \medskip
 
     \item \textbf{views: }  
-    Recreates only the database views and materialized views defined in the C.3 section without resetting or modifying the underlying data. This is useful when the schema and data already exist but the analytical layer needs to be refreshed or updated.
+    Recreates only the analytical views and materialized views defined in the C.3 section without resetting or modifying the underlying data. This is useful when the database already exists but the analytical layer needs to be refreshed or updated.
 
     \medskip
 
     \item \textbf{refresh: }  
-    Recomputes the materialized view \texttt{player\_telemetry\_summary}. This operation updates precomputed aggregated telemetry results, ensuring that analytical outputs reflect the most recent underlying data.
+    Recomputes the materialized view \texttt{player\_telemetry\_summary}, updating aggregated telemetry statistics based on the current data in the database.
 
     \medskip
 
     \item \textbf{analytics: }  
-    Executes the full set of analytical SQL queries defined in \texttt{consultas\_analiticas.sql}. These queries are used to extract insights from the dataset and validate the correctness of the schema and data relationships.
+    Executes the full set of analytical SQL queries defined in \texttt{consultas\_analiticas.sql}. These queries are used to extract insights and validate the correctness of the data model.
 
     \medskip
 
     \item \textbf{indexes: }  
-    Executes the index creation and evaluation script defined in \texttt{indices\_evaluacion.sql}. This target is used to measure and demonstrate query performance improvements through indexing strategies.
+    Executes the index creation and evaluation script defined in \texttt{indices\_evaluacion.sql}, used to measure and demonstrate query performance improvements.
 
     \medskip
 
     \item \textbf{test: }  
-    Runs a set of lightweight validation queries over key views. These queries provide a quick sanity check to verify that the database has been correctly built and that the main analytical views are returning expected results.
+    Runs a set of lightweight validation queries over key views. These queries provide a quick sanity check to verify that the database has been correctly built and that the main analytical outputs are available.
 
 \end{itemize}
+
 \subsection{Purpose}
 
-This automation allows the database to be fully rebuilt with a single command, without manual steps. It ensures that the setup process is consistent and repeatable, reduces the risk of errors, and makes it easier to reproduce the system in different environments.
+This automation enables the complete reconstruction of the database system through a single command, eliminating the need for manual setup steps. It guarantees a consistent and deterministic pipeline, where the same input data and scripts always produce an identical database state.
 
-\clearpage
+By integrating preprocessing (\texttt{generate}), schema creation, data ingestion through a staging layer, ETL processing, and analytical view construction, the Makefile ensures that the entire workflow can be reproduced end-to-end without ambiguity.
+
+Additionally, this approach reduces the risk of human error during deployment, enforces correct execution order of dependencies, and significantly improves reproducibility across different environments, making the system easier to evaluate, test, and maintain.
+
+%\clearpage
 \section{Conclusions}
 \medskip In this project, we designed and implemented a relational database to store gameplay telemetry together with user information and UX survey data. The schema follows a structured approach that separates core entities such as users, games, telemetry events, and survey responses, making the system organized and scalable.
 
