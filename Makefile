@@ -16,6 +16,7 @@ generate:
 
 load: reset
 	psql -U $(DB_USER) -d $(DB_NAME) -f "DDL proyecto(1).sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -f "master_data.sql"
 	psql -U $(DB_USER) -d $(DB_NAME) -f "parte_3_puntoB.sql"
 	psql -U $(DB_USER) -d $(DB_NAME) -f "parte2_puntoB.sql"
 	psql -U $(DB_USER) -d $(DB_NAME) -c "\copy staging_telemetry FROM 'telemetry.tsv' WITH (FORMAT csv, DELIMITER E'\t', HEADER true);"
