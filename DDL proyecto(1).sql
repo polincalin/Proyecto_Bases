@@ -48,6 +48,7 @@ CREATE TABLE Game (
 CREATE TABLE TelemetryEvent (
     event_id BIGSERIAL PRIMARY KEY,
     game_id INTEGER REFERENCES Game(game_id) ON DELETE CASCADE,
+    player_id INTEGER REFERENCES Player(player_id) ON DELETE CASCADE,
     sector_id INTEGER REFERENCES Sector(sector_id) ON DELETE SET NULL,
     tic INTEGER NOT NULL,
     pos_x DOUBLE PRECISION NOT NULL,
