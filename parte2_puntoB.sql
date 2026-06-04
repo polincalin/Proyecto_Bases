@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS ingestion_error_log (
 
 -- 3. Proceso ETL 
 INSERT INTO ingestion_error_log (game_id, tic, motivo)
-SELECT game_id_raw, tic_raw, 'Faltan IDs críticos o TIC'
+SELECT game_id_raw, tic_raw
 FROM staging_telemetry
 WHERE game_id_raw IS NULL OR player_id_raw IS NULL OR tic_raw IS NULL;
 
