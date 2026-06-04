@@ -44,8 +44,8 @@ INSERT INTO UXItem (item_id, instrument_id, subscale_id, item_number, question_t
 (14, 1, 7, 14, 'I want to do as well as possible during the game.', FALSE),
  
 -- Visual Aesthetics
-(17, 1, 9, 17, 'I enjoy the game''s graphics.', FALSE),
-(18, 1, 9, 18, 'I think the game is visually appealing.', FALSE);
+(17, 1, 8, 17, 'I enjoy the game''s graphics.', FALSE),
+(18, 1, 8, 18, 'I think the game is visually appealing.', FALSE);
  
 -- Resincronizar las secuencias en PostgreSQL para futuros INSERTS
 SELECT setval('uxinstrument_instrument_id_seq', (SELECT MAX(instrument_id) FROM UXInstrument));
