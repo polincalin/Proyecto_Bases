@@ -1,54 +1,60 @@
-{ }\documentclass{article}
-
+\documentclass[11pt]{article}
 \usepackage[utf8]{inputenc}
-\usepackage{amsmath, esint}
-\usepackage{wasysym}
-\usepackage{qrcode}
-\usepackage[colorlinks]{hyperref}
+\usepackage[T1]{fontenc}
 \usepackage{lmodern}
+\usepackage[left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm]{geometry}
 \usepackage{graphicx}
+\usepackage{float}
 \usepackage{xcolor}
-\usepackage{minted}
-
-\setminted{
-    bgcolor=gray!6,
-    frame=lines,
-    framesep=4mm,
-    baselinestretch=1.1,
-    fontsize=\small,
-    linenos
-}
-\usepackage{xcolor}
-\usepackage[left=2.5cm, top=2.5cm, right=2.5cm]{geometry}
-\usepackage{minted}
 \usepackage{booktabs}
-\usepackage{svg}
-\usepackage{xcolor}
-\definecolor{LightGray}{gray}{0.975}
-\usepackage{xcolor}
 \usepackage{tabularx}
-\usepackage{booktabs}
-\definecolor{MyPurple}{RGB}{120, 0, 180}
-\renewcommand{\arraystretch}{1.2}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\definecolor{MyPurple}{RGB}{120,0,180}
+\definecolor{LightGray}{gray}{0.975}
+\definecolor{CodeFrame}{RGB}{210,210,210}
+\definecolor{SqlBlue}{RGB}{31,98,135}
+\hypersetup{colorlinks=true, linkcolor=MyPurple, urlcolor=blue, citecolor=MyPurple}
 \setlength{\parindent}{0pt}
-
-\setlength{\parindent}{1pt}
-\setlength{\parskip}{3pt}
-
-\hypersetup{
-  colorlinks=true,
-  linkcolor=MyPurple,
-  urlcolor=blue,
-  citecolor=MyPurple
+\setlength{\parskip}{5pt}
+\renewcommand{\arraystretch}{1.18}
+\lstdefinestyle{sqlstyle}{
+    language=SQL,
+    basicstyle=\ttfamily\scriptsize,
+    keywordstyle=\color{SqlBlue}\bfseries,
+    commentstyle=\color{gray},
+    stringstyle=\color{MyPurple},
+    breaklines=true,
+    breakatwhitespace=false,
+    showstringspaces=false,
+    frame=single,
+    rulecolor=\color{CodeFrame},
+    backgroundcolor=\color{LightGray},
+    columns=fullflexible,
+    keepspaces=true,
+    tabsize=2
 }
-\title{Databases \\ \textbf{Project : Designing a Telemetry and UX Database for \textit{Chocolate-Doom}}}
-\author{Fergie Lindsay Díaz, Juan Esteban Ortega, Juan Esteban, Federico Mejia}
-\date{today}
-
+\lstdefinestyle{makestyle}{
+    basicstyle=\ttfamily\scriptsize,
+    breaklines=true,
+    frame=single,
+    rulecolor=\color{CodeFrame},
+    backgroundcolor=\color{LightGray},
+    columns=fullflexible,
+    keepspaces=true
+}
+\newcommand{\dictheader}{\hline \textbf{Attribute} & \textbf{Type} & \textbf{Constraints} & \textbf{Description} \\ \hline}
+\title{Databases\\\textbf{Final Report: Designing a Telemetry and UX Database for \textit{Chocolate-Doom}}}
+\author{Fergie Lindsay D\'iaz, Juan Esteban Ortega, Juan Esteban, Federico Mejia}
+\date{June 2026}
 \begin{document}
 \maketitle
 \tableofcontents
-
 \clearpage
 
 \section{Introduction and context} 
@@ -76,7 +82,7 @@ and how individual trajectories develop during the game. We will also relate thi
   \item Each telemetry record is uniquely identified by (game\_id, tic).
   \item Each Game is linked to exactly one Map and one Episode.
   \item Maps are divided into Sectors, which help us analyze player positions.
-  \item Each user answers only one UX survey after playing.
+  \item Each user is expected to submit one UX survey after gameplay.
   \item Survey responses are completed after the game session and linked to the user.
 \end{itemize}
 
@@ -108,7 +114,7 @@ and how individual trajectories develop during the game. We will also relate thi
   \item If some telemetry records are invalid or broken, they should be logged and skipped without stopping the whole ingestion process.
 \end{itemize}
 
-\section{Survey Election - GUESS}
+\clearpage \section{Survey Election - GUESS}
 
 The survey we decided to work with and base our design on is Game User-Experience Satisfaction Scale \href{https://uxpajournal.org/wp-content/uploads/sites/7/pdf/JUS_Keebler_GUESS-18%20Scoring%20Guidelines.pdf}{\textbf{GUESS}}. 
 
@@ -130,6 +136,7 @@ The survey we decided to work with and base our design on is Game User-Experienc
 
 \medskip Finally, it is short, so players can answer it quickly after playing. This makes it more likely that we get complete and honest responses.
 
+\clearpage
 
 \section{Entity-Relation Diagram}
 
@@ -147,26 +154,36 @@ The diagram organizes gameplay telemetry, user information, and survey responses
 
 
 
-\section{Relational Schema - Initial Draft}
+\section{Relational Schema}
 
-This section translates the conceptual ER model into a relational schema. It defines the entities, entities with attributes, and keys required to implement the database in a structured and normalized form. 
+The database is normalized by separating participant identity, gameplay metadata, map structure, telemetry events, and UX responses. High-frequency telemetry is isolated in \texttt{TelemetryEvent}, while relatively stable reference data such as \texttt{Episode}, \texttt{Map}, \texttt{Sector}, and UX metadata remain in separate tables.
 
-\subsection{Entities}
+The most important correction in the final schema is the composite key in \texttt{Game}. A simple primary key on \texttt{game\_id} would fail with the real telemetry because one session can include more than one participant. The final model therefore uses:
 
+\begin{lstlisting}[style=sqlstyle]
+PRIMARY KEY (game_id, player_id)
+\end{lstlisting}
+
+and \texttt{TelemetryEvent} includes \texttt{player\_id} and references the composite key:
+
+\begin{lstlisting}[style=sqlstyle]
+FOREIGN KEY (game_id, player_id)
+REFERENCES Game(game_id, player_id)
+ON DELETE CASCADE
+\end{lstlisting}
+
+
+\subsection{Core entities}
 This subsection lists the core entities identified in the system. These represent the main objects stored in the database, including users, gameplay sessions, telemetry records, and UX survey components.
 
 \begin{itemize}
-    \item AppUser
-    \item Player
-    \item Game
-    \item TelemetryEvent
-    \item Episode
-    \item Map
-    \item Sector
-    \item UXInstrument
-    \item UXItem
-    \item UXResponse
-    \item UXResponseItem
+    \item \texttt{AppUser}: participant demographics and informed consent.
+    \item \texttt{Player}: in-game alias linked to a user.
+    \item \texttt{Episode}, \texttt{Map}, \texttt{Sector}: level hierarchy and spatial grouping.
+    \item \texttt{Game}: player participation in a shared session.
+    \item \texttt{TelemetryEvent}: atomic per-tic player state.
+    \item \texttt{UXInstrument}, \texttt{UXSubscale}, \texttt{UXItem}: UX questionnaire metadata.
+    \item \texttt{UXResponse}, \texttt{UXResponseItem}: user responses at response and item level.
 \end{itemize}
 
 \subsection{Foreign Keys}
@@ -176,9 +193,9 @@ The way in which we write or show the foreign keys will later help us in the way
 
 \smallskip
 \textit{\textbf{Example}}:
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
           FOREIGN KEY (user_id) REFERENCES User(user_id)
-\end{minted}
+\end{lstlisting}
 
 
 This subsection defines the relationships between tables using foreign keys. These constraints enforce referential integrity and ensure consistency across users, gameplay sessions, telemetry events, and UX responses.
@@ -393,76 +410,24 @@ score & INTEGER & CHECK ($\geq 0$) & Score given to the item \\
   \item \href{https://www.postgresql.org/docs/current/ddl-constraints.html}{\textbf{ON DELETE SET NULL}}: If a parent row is deleted, the link is removed but the child row stays (foreign key becomes \texttt{NULL}).  
     \textit{Example:} If a \texttt{Sector} is deleted, the \texttt{TelemetryEvent} still exists but its \texttt{sector\_id} becomes \texttt{NULL}. If a \texttt{UXSubscale} is deleted, the \texttt{UXItem} remains but loses its subscale link.
 \end{itemize}
-\subsection{1. AppUser}
 
-\begin{minted}{sql}
-CREATE TABLE AppUser (
-    user_id SERIAL PRIMARY KEY,
-    age INTEGER CHECK (age BETWEEN 10 AND 100),
-    gender VARCHAR(50),
-    experience_level VARCHAR(50),
-    consent BOOLEAN NOT NULL DEFAULT FALSE
-);
-\end{minted}
+\subsection{Data Definition Language highlights}
+The DDL was implemented in PostgreSQL. The final schema uses standard relational constraints and keeps telemetry fields typed as numeric values so that spatial and temporal analysis can be performed directly in SQL.
 
-\subsection{2. Player}
-
-\begin{minted}{sql}
-CREATE TABLE Player (
-    player_id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES AppUser(user_id) ON DELETE CASCADE,
-    nickname VARCHAR(100) NOT NULL
-);
-\end{minted}
-
-\subsection{3. Episode}
-
-\begin{minted}{sql}
-CREATE TABLE Episode (
-    episode_id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL
-);
-\end{minted}
-
-\subsection{4. Map}
-
-\begin{minted}{sql}
-CREATE TABLE Map (
-    map_id SERIAL PRIMARY KEY,
-    episode_id INTEGER REFERENCES Episode(episode_id) ON DELETE CASCADE,
-    map_code VARCHAR(50) NOT NULL
-);
-\end{minted}
-
-\subsection{5. Sector}
-
-\begin{minted}{sql}
-CREATE TABLE Sector (
-    sector_id SERIAL PRIMARY KEY,
-    map_id INTEGER REFERENCES Map(map_id) ON DELETE CASCADE,
-    grid_x INTEGER,
-    grid_y INTEGER
-);
-\end{minted}
-
-\subsection{6. Game}
-
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 CREATE TABLE Game (
-    game_id SERIAL PRIMARY KEY,
-    player_id INTEGER REFERENCES Player(player_id) ON DELETE CASCADE,
+    game_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL REFERENCES Player(player_id) ON DELETE CASCADE,
     map_id INTEGER REFERENCES Map(map_id) ON DELETE CASCADE,
     start_time TIMESTAMP NOT NULL,
-    end_time TIMESTAMP
+    end_time TIMESTAMP,
+    PRIMARY KEY (game_id, player_id)
 );
-\end{minted}
 
-\subsection{7. TelemetryEvent}
-
-\begin{minted}{sql}
 CREATE TABLE TelemetryEvent (
     event_id BIGSERIAL PRIMARY KEY,
-    game_id INTEGER REFERENCES Game(game_id) ON DELETE CASCADE,
+    game_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
     sector_id INTEGER REFERENCES Sector(sector_id) ON DELETE SET NULL,
     tic INTEGER NOT NULL,
     pos_x DOUBLE PRECISION NOT NULL,
@@ -474,69 +439,13 @@ CREATE TABLE TelemetryEvent (
     health INTEGER,
     armor INTEGER,
     ammo INTEGER,
-    CONSTRAINT uq_telem UNIQUE (game_id, tic)
+    FOREIGN KEY (game_id, player_id)
+        REFERENCES Game(game_id, player_id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_telem UNIQUE (game_id, player_id, tic)
 );
-\end{minted}
+\end{lstlisting}
 
-\subsection{8. UXInstrument}
-
-\begin{minted}{sql}
-CREATE TABLE UXInstrument (
-    instrument_id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    version VARCHAR(50),
-    scale_min INTEGER,
-    scale_max INTEGER
-);
-\end{minted}
-
-\subsection{9. UXSubscale}
-
-\begin{minted}{sql}
-CREATE TABLE UXSubscale (
-    subscale_id SERIAL PRIMARY KEY,
-    instrument_id INTEGER REFERENCES UXInstrument(instrument_id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL,
-    code VARCHAR(20)
-);
-\end{minted}
-
-\subsection{10. UXItem}
-
-\begin{minted}{sql}
-CREATE TABLE UXItem (
-    item_id SERIAL PRIMARY KEY,
-    instrument_id INTEGER REFERENCES UXInstrument(instrument_id) ON DELETE CASCADE,
-    subscale_id INTEGER REFERENCES UXSubscale(subscale_id) ON DELETE SET NULL,
-    item_number INTEGER NOT NULL,
-    question_text TEXT NOT NULL,
-    is_reverse_scored BOOLEAN DEFAULT FALSE
-);
-\end{minted}
-
-\subsection{11. UXResponse}
-
-\begin{minted}{sql}
-CREATE TABLE UXResponse (
-    response_id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES AppUser(user_id) ON DELETE CASCADE,
-    instrument_id INTEGER REFERENCES UXInstrument(instrument_id) ON DELETE CASCADE,
-    responded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-\end{minted}
-
-\subsection{12. UXResponseItem}
-
-\begin{minted}{sql}
-CREATE TABLE UXResponseItem (
-    response_id INTEGER REFERENCES UXResponse(response_id) ON DELETE CASCADE,
-    item_id INTEGER REFERENCES UXItem(item_id) ON DELETE CASCADE,
-    score INTEGER NOT NULL CHECK (score >= 0),
-    PRIMARY KEY (response_id, item_id)
-);
-\end{minted}
-
-\clearpage
 \section{SQL CODES}
 
 \subsection{parte2\_puntoB.sql}
@@ -553,7 +462,7 @@ Then, we check for invalid records (for example, missing game, player, or tic in
 
 Finally, the valid data is cleaned, converted to the correct data types, and inserted into the \texttt{TelemetryEvent} table. Duplicate records are avoided, and empty values are handled properly.
 
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 -- 1. Crear tabla de Staging
 CREATE TABLE IF NOT EXISTS staging_telemetry (
     game_id_raw      TEXT,
@@ -582,7 +491,7 @@ CREATE TABLE IF NOT EXISTS ingestion_error_log (
 
 -- 3. Proceso ETL 
 INSERT INTO ingestion_error_log (game_id, tic, motivo)
-SELECT game_id_raw, tic_raw, 'Faltan IDs críticos o TIC'
+SELECT game_id_raw, tic_raw, 
 FROM staging_telemetry
 WHERE game_id_raw IS NULL OR player_id_raw IS NULL OR tic_raw IS NULL;
 
@@ -611,7 +520,7 @@ WHERE game_id_raw IS NOT NULL
   AND player_id_raw IS NOT NULL 
   AND tic_raw IS NOT NULL
 ORDER BY CAST(game_id_raw AS INT), CAST(player_id_raw AS INT), CAST(tic_raw AS INT);
-\end{minted}
+\end{lstlisting}
 
 \clearpage
 \subsection{parte\_3\_puntoB.sql}
@@ -649,7 +558,7 @@ Each subscale focuses on a specific category, such as :
 
 This organization allows the analysis to evaluate different dimensions of the game experience separately, instead of treating all responses as a single score.
 
-In our implementation, the GUESS-18 survey is divided into nine subscales, each containing two items or questions.
+In our implementation, the GUESS-18 survey is divided into nine subscales, each containing two items or questions, but we used \textbf{8 / 9} because one of these included the experience with other players, what was discussed and taken out to follow instructions and rules of the game: one player.
 
 Each question (item) belongs to one subscale, allowing us to group responses and analyze different aspects of the player experience independently.
 
@@ -661,12 +570,12 @@ Each subscale is stored in the \texttt{UXSubscale} table and is linked to its co
 \end{itemize}
 
 \clearpage
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 -- 1. Insertar el instrumento GUESS-18
 INSERT INTO UXInstrument (instrument_id, name, version, scale_min, scale_max) 
 VALUES (1, 'GUESS', '18-Item Short Scale', 1, 7);
  
--- 2. Insertar las 9 Subescalas oficiales del GUESS-18
+-- 2. Insertar 8/9 Subescalas oficiales del GUESS-18
 INSERT INTO UXSubscale (subscale_id, instrument_id, name, code) VALUES 
 (1, 1, 'Usability/Playability', 'USAB'),
 (2, 1, 'Narratives', 'NARR'),
@@ -677,7 +586,7 @@ INSERT INTO UXSubscale (subscale_id, instrument_id, name, code) VALUES
 (7, 1, 'Personal Gratification', 'GRAT'),
 (8, 1, 'Visual Aesthetics', 'VISU');
  
--- 3. Insertar los 18 ítems (2 por subescala)
+-- 3. Insertar los 16 ítems (2 por subescala)
 INSERT INTO UXItem (item_id, instrument_id, subscale_id, item_number, question_text, is_reverse_scored) VALUES 
 -- Usability/Playability
 (1, 1, 1, 1, 'I find the controls of the game to be straightforward.', FALSE),
@@ -715,15 +624,15 @@ INSERT INTO UXItem (item_id, instrument_id, subscale_id, item_number, question_t
 SELECT setval('uxinstrument_instrument_id_seq', (SELECT MAX(instrument_id) FROM UXInstrument));
 SELECT setval('uxsubscale_subscale_id_seq', (SELECT MAX(subscale_id) FROM UXSubscale));
 SELECT setval('uxitem_item_id_seq', (SELECT MAX(item_id) FROM UXItem));
- 
-\end{minted}
+\end{lstlisting}
 
+\clearpage
 \section{C.3 Views and Materialized View}
 This section defines SQL views and a materialized view used to support frequent analytical queries over gameplay and telemetry data. These structures simplify complex queries and improve performance for repeated analyses.
 
 \subsection{View 1: Player Game Summary}
 
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 CREATE VIEW player_game_summary AS
 SELECT
     p.player_id,
@@ -734,7 +643,7 @@ SELECT
 FROM Player p
 JOIN Game g ON p.player_id = g.player_id
 GROUP BY p.player_id, p.nickname;
-\end{minted}
+\end{lstlisting}
 
 This view summarizes the activity of each player by counting the number of games played and showing their first and last recorded sessions.
 
@@ -742,7 +651,7 @@ This view summarizes the activity of each player by counting the number of games
 
 \subsection{View 2: Map and Episode Activity Summary}
 
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 CREATE VIEW map_activity_summary AS
 SELECT
     e.episode_id,
@@ -754,7 +663,7 @@ FROM Episode e
 JOIN Map m ON e.episode_id = m.episode_id
 JOIN Game g ON m.map_id = g.map_id
 GROUP BY e.episode_id, e.name, m.map_id, m.map_code;
-\end{minted}
+\end{lstlisting}
 
 This view provides a summary of gameplay activity per map and episode, allowing analysis of which levels are most frequently played.
 
@@ -762,7 +671,7 @@ This view provides a summary of gameplay activity per map and episode, allowing 
 
 \subsection{Materialized View: Player Telemetry Summary}
 
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 CREATE MATERIALIZED VIEW player_telemetry_summary AS
 SELECT
     g.game_id,
@@ -775,7 +684,7 @@ SELECT
 FROM Game g
 JOIN TelemetryEvent t ON g.game_id = t.game_id
 GROUP BY g.game_id, g.player_id;
-\end{minted}
+\end{lstlisting}
 
 This materialized view precomputes aggregated telemetry statistics per game session. Since telemetry data is large and frequently queried, storing pre-aggregated results improves performance significantly.
 
@@ -783,350 +692,326 @@ A materialized view is used instead of a regular view because regular views exec
 
 \subsection{Refreshing the Materialized View}
 
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 REFRESH MATERIALIZED VIEW player_telemetry_summary;
-\end{minted}
+\end{lstlisting}
 
 This command is used to update the materialized view when new telemetry data is inserted into the database.
 \clearpage
-\section{Queries}
-
-In this section we present six analytical queries selected from the project brief. They were adapted to the
-corrected schema, where a shared session is represented by game\_id and each player participation
-is represented by (game\_id, player\_id).
-
-It is important to note that \textit{some} of the original queries seemed to assume a multiplayer environment, which could lead to misinterpretation, since Chocolate-Doom is strictly a single-player game. 
-So in order to design those queries, we extended the analysis by comparing spatial positions of different players across separate game sessions.
+\section{Analytical queries and results}
+This section presents six analytical queries selected from the project brief. They were adapted to the corrected schema, where a shared session is represented by \texttt{game\_id} and each player participation is represented by \texttt{(game\_id, player\_id)}.
 
 \subsection{Query 1: average session duration per map}
-
 This query computes the average duration of game participations per map.
 
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 SELECT
-m.map_id,
-m.map_code,
-e.name AS episodio,
-COUNT(*) AS sesiones,
-AVG(g.end_time - g.start_time) AS duracion_promedio
+    m.map_id,
+    m.map_code,
+    e.name AS episodio,
+    COUNT(*) AS sesiones,
+    AVG(g.end_time - g.start_time) AS duracion_promedio
 FROM Game g
-JOIN Map m ON g.map_id = m.map_id
+JOIN Map m     ON g.map_id = m.map_id
 JOIN Episode e ON m.episode_id = e.episode_id
 WHERE g.end_time IS NOT NULL
 GROUP BY m.map_id, m.map_code, e.name
 ORDER BY duracion_promedio DESC;
-\end{minted}
+\end{lstlisting}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
-\begin{tabular}{llll}
-\hline
-map code & episode & sessions & average duration \\
-\hline
+\begin{tabular}{llrr}
+\toprule
+\textbf{map code} & \textbf{episode} & \textbf{sessions} & \textbf{average duration} \\
+\midrule
 E1M1 & Knee-Deep in the Dead & 10 & 00:00:42.1 \\
 E2M1 & The Shores of Hell & 10 & 00:00:31.3 \\
 E3M1 & Inferno & 8 & 00:00:29.5 \\
-\hline
+\bottomrule
 \end{tabular}
-\caption{Average session duration by map}
+\caption{Average session duration by map.}
 \end{table}
 
-\subsection{Query 2: players with the highest average proximity}
-A self-join compares players at the same game\_id and tic. A lower average Euclidean distance
-indicates greater proximity.
+\textbf{Interpretation.} This query identifies which maps tend to generate longer gameplay sessions. Longer average durations may indicate higher engagement, greater map complexity, or larger exploration requirements.
 
-\begin{minted}{sql}
+\clearpage
+\subsection{Query 2: players with the highest average proximity}
+A self-join compares players at the same \texttt{game\_id} and \texttt{tic}. A lower average Euclidean distance indicates greater proximity.
+
+\begin{lstlisting}[style=sqlstyle]
 SELECT
-a.player_id AS jugador_a,
-b.player_id AS jugador_b,
-COUNT(*) AS tics_comparados,
-ROUND(AVG(sqrt(power(a.pos_x - b.pos_x, 2)
-+ power(a.pos_y - b.pos_y, 2)))::numeric, 2) AS distancia_promedio
+    a.player_id AS jugador_a,
+    b.player_id AS jugador_b,
+    COUNT(*) AS tics_comparados,
+    ROUND(AVG(sqrt(power(a.pos_x - b.pos_x, 2)
+                 + power(a.pos_y - b.pos_y, 2)))::numeric, 2) AS distancia_promedio
 FROM TelemetryEvent a
 JOIN TelemetryEvent b
-ON a.game_id = b.game_id
-AND a.tic = b.tic
-AND a.player_id < b.player_id
+  ON a.game_id = b.game_id
+ AND a.tic = b.tic
+ AND a.player_id < b.player_id
 GROUP BY a.player_id, b.player_id
 ORDER BY distancia_promedio ASC;
-\end{minted}
+\end{lstlisting}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
-\begin{tabular}{llll}
-\hline
-player A & player B & compared tics & avg. distance \\
-\hline
+\begin{tabular}{rrrr}
+\toprule
+\textbf{player A} & \textbf{player B} & \textbf{compared tics} & \textbf{avg. distance} \\
+\midrule
 3 & 4 & 1300 & 522.70 \\
 4 & 6 & 1200 & 904.71 \\
 2 & 4 & 1000 & 992.56 \\
 2 & 6 & 1800 & 1093.84 \\
 3 & 6 & 800 & 1165.15 \\
-\hline
+\bottomrule
 \end{tabular}
-\caption{Closest player pairs by average distance}
+\caption{Closest player pairs by average distance.}
 \end{table}
 
+\textbf{Interpretation.} Player pairs with lower average Euclidean distance tend to remain physically closer during gameplay. This may indicate cooperation, coordinated movement, or shared objectives.
+
+\clearpage
 \subsection{Query 3: shortest and longest trajectory distances per player}
-This query uses LAG() to calculate step-by-step distance between consecutive tics, then aggregates
-trajectory length by player. Using a window function provides a clearer solution than repeatedly
-self-joining the table.
-\begin{minted}{sql}
+This query uses \texttt{LAG()} to calculate step-by-step distance between consecutive tics, then aggregates trajectory length by player. Using a window function provides a clearer solution than repeatedly self-joining the table.
+
+\begin{lstlisting}[style=sqlstyle]
 WITH pasos AS (
-SELECT
-game_id, player_id, tic, pos_x, pos_y,
-LAG(pos_x) OVER w AS px_prev,
-LAG(pos_y) OVER w AS py_prev
-FROM TelemetryEvent
-WINDOW w AS (PARTITION BY game_id, player_id ORDER BY tic)
+    SELECT
+        game_id, player_id, tic, pos_x, pos_y,
+        LAG(pos_x) OVER w AS px_prev,
+        LAG(pos_y) OVER w AS py_prev
+    FROM TelemetryEvent
+    WINDOW w AS (PARTITION BY game_id, player_id ORDER BY tic)
 ),
 dist_por_partida AS (
-SELECT
-game_id,
-player_id,
-SUM(sqrt(power(pos_x - px_prev, 2) + power(pos_y - py_prev, 2))) AS dist_total
-FROM pasos
-WHERE px_prev IS NOT NULL
-GROUP BY game_id, player_id
+    SELECT
+        game_id,
+        player_id,
+        SUM(sqrt(power(pos_x - px_prev, 2) + power(pos_y - py_prev, 2))) AS dist_total
+    FROM pasos
+    WHERE px_prev IS NOT NULL
+    GROUP BY game_id, player_id
 )
 SELECT
-player_id,
-COUNT(*) AS partidas_jugadas,
-ROUND(MIN(dist_total)::numeric, 2) AS trayectoria_min,
-ROUND(MAX(dist_total)::numeric, 2) AS trayectoria_max
+    player_id,
+    COUNT(*) AS partidas_jugadas,
+    ROUND(MIN(dist_total)::numeric, 2) AS trayectoria_min,
+    ROUND(MAX(dist_total)::numeric, 2) AS trayectoria_max
 FROM dist_por_partida
 GROUP BY player_id
 ORDER BY player_id;
-\end{minted}
+\end{lstlisting}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
-\begin{tabular}{llll}
-\hline
-player & games & min distance & max distance \\
-\hline
+\begin{tabular}{rrrr}
+\toprule
+\textbf{player} & \textbf{games} & \textbf{min distance} & \textbf{max distance} \\
+\midrule
 1 & 5 & 7587.75 & 17487.44 \\
 2 & 5 & 8448.40 & 15889.34 \\
 3 & 5 & 6060.07 & 11384.56 \\
 4 & 5 & 5843.17 & 8502.11 \\
 5 & 4 & 9838.55 & 18994.42 \\
 6 & 4 & 6488.90 & 14039.98 \\
-\hline
+\bottomrule
 \end{tabular}
-\caption{Minimum and maximum trajectory distance by player}
+\caption{Minimum and maximum trajectory distance by player.}
 \end{table}
 
+\textbf{Interpretation.} Trajectory length provides a quantitative measure of player movement. Large trajectory values suggest exploration-oriented behavior, while shorter trajectories may indicate defensive or objective-focused play styles.
+
+\clearpage
 \subsection{Query 4: UX responses for players with above-average trajectory duration}
+Trajectory duration is measured as the number of telemetry tics per player. The global average is 5,750 tics. Players 1, 2, and 3 are above that average, so their UX scores are grouped by subscale.
 
-Trajectory duration is measured as the number of telemetry tics per player. The global average is
-5,750 tics. Players 1, 2, and 3 are above that average, so their UX scores are grouped by subscale.
-
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 WITH duracion AS (
-SELECT player_id, COUNT(*) AS tics_totales
-FROM TelemetryEvent
-GROUP BY player_id
+    SELECT player_id, COUNT(*) AS tics_totales
+    FROM TelemetryEvent
+    GROUP BY player_id
 ),
 promedio AS (
-SELECT AVG(tics_totales) AS media_global FROM duracion
+    SELECT AVG(tics_totales) AS media_global FROM duracion
 )
 SELECT
-p.player_id,
-p.nickname,
-d.tics_totales,
-s.code AS subescala,
-ROUND(AVG(ri.score), 2) AS puntaje_promedio
+    p.player_id,
+    p.nickname,
+    d.tics_totales,
+    s.code AS subescala,
+    ROUND(AVG(ri.score), 2) AS puntaje_promedio
 FROM duracion d
 CROSS JOIN promedio pr
-JOIN Player p ON p.player_id = d.player_id
-JOIN UXResponse r ON r.user_id = p.user_id
+JOIN Player p          ON p.player_id = d.player_id
+JOIN UXResponse r      ON r.user_id = p.user_id
 JOIN UXResponseItem ri ON ri.response_id = r.response_id
-JOIN UXItem i ON i.item_id = ri.item_id
-JOIN UXSubscale s ON s.subscale_id = i.subscale_id
+JOIN UXItem i          ON i.item_id = ri.item_id
+JOIN UXSubscale s      ON s.subscale_id = i.subscale_id
 WHERE d.tics_totales > pr.media_global
 GROUP BY p.player_id, p.nickname, d.tics_totales, s.code
 ORDER BY p.player_id, s.code;
-\end{minted}
+\end{lstlisting}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
-\begin{tabular}{lll}
-\hline
-player & nickname & total tics \\
-\hline
+\begin{tabular}{llr}
+\toprule
+\textbf{player} & \textbf{nickname} & \textbf{total tics} \\
+\midrule
 1 & Doomguy & 6000 \\
 2 & Ranger & 6300 \\
 3 & Crash & 5800 \\
-\hline
+\bottomrule
 \end{tabular}
-\caption{Players above the global average trajectory duration}
+\caption{Players above the global average trajectory duration.}
 \end{table}
 
+\textbf{Interpretation.} By combining UX responses with trajectory duration, this query explores whether players who remain active longer report different subjective experiences than average players.
+
+\clearpage
 \subsection{Query 5: most visited sector per episode and map}
+This query counts visits by episode, map, and sector, then uses \texttt{ROW\_NUMBER()} to keep the most visited sector per map.
 
-This query counts visits by episode, map, and sector, then uses ROW\_NUMBER() to keep the most
-visited sector per map.
-
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 WITH conteo AS (
-SELECT
-e.episode_id,
-e.name AS episodio,
-m.map_id,
-m.map_code,
-t.sector_id,
-COUNT(*) AS visitas,
-ROW_NUMBER() OVER (
-PARTITION BY e.episode_id, m.map_id
-ORDER BY COUNT(*) DESC
-) AS rn
-FROM TelemetryEvent t
-JOIN Game g ON g.game_id = t.game_id AND g.player_id = t.player_id
-JOIN Map m ON m.map_id = g.map_id
-JOIN Episode e ON e.episode_id = m.episode_id
-WHERE t.sector_id IS NOT NULL
-GROUP BY e.episode_id, e.name, m.map_id, m.map_code, t.sector_id
+    SELECT
+        e.episode_id,
+        e.name AS episodio,
+        m.map_id,
+        m.map_code,
+        t.sector_id,
+        COUNT(*) AS visitas,
+        ROW_NUMBER() OVER (
+            PARTITION BY e.episode_id, m.map_id
+            ORDER BY COUNT(*) DESC
+        ) AS rn
+    FROM TelemetryEvent t
+    JOIN Game g    ON g.game_id = t.game_id AND g.player_id = t.player_id
+    JOIN Map m     ON m.map_id = g.map_id
+    JOIN Episode e ON e.episode_id = m.episode_id
+    WHERE t.sector_id IS NOT NULL
+    GROUP BY e.episode_id, e.name, m.map_id, m.map_code, t.sector_id
 )
 SELECT episodio, map_code, sector_id AS sector_hotspot, visitas
 FROM conteo
 WHERE rn = 1
 ORDER BY episodio, map_code;
-\end{minted}
+\end{lstlisting}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
-\begin{tabular}{llll}
-\hline
-episode & map & hotspot sector & visits \\
-\hline
+\begin{tabular}{llrr}
+\toprule
+\textbf{episode} & \textbf{map} & \textbf{hotspot sector} & \textbf{visits} \\
+\midrule
 Inferno & E3M1 & 246 & 217 \\
 Knee-Deep in the Dead & E1M1 & 655 & 293 \\
 The Shores of Hell & E2M1 & 489 & 194 \\
-\hline
+\bottomrule
 \end{tabular}
-\caption{Most visited sector by episode and map}
+\caption{Most visited sector by episode and map.}
 \end{table}
 
+\textbf{Interpretation.} Hotspot sectors reveal the areas that attract the highest player activity. These sectors may correspond to combat zones, resource-rich areas, or strategic map locations.
+
+\clearpage
 \subsection{Query 6: number of tics where players were together in a sector}
+A self-join matches rows with the same \texttt{game\_id}, \texttt{tic}, and \texttt{sector\_id}, but different players. The result counts how many tics each pair shared in the same sector.
 
-A self-join matches rows with the same game\_id, tic, and sector\_id, but different players. The
-result counts how many tics each pair shared in the same sector.
-
-\begin{minted}{sql}
+\begin{lstlisting}[style=sqlstyle]
 SELECT
-a.game_id,
-a.player_id AS jugador_a,
-b.player_id AS jugador_b,
-COUNT(DISTINCT a.tic) AS tics_juntos
+    a.game_id,
+    a.player_id AS jugador_a,
+    b.player_id AS jugador_b,
+    COUNT(DISTINCT a.tic) AS tics_juntos
 FROM TelemetryEvent a
 JOIN TelemetryEvent b
-ON a.game_id = b.game_id
-AND a.tic = b.tic
-AND a.sector_id = b.sector_id
-AND a.player_id < b.player_id
+  ON a.game_id = b.game_id
+ AND a.tic = b.tic
+ AND a.sector_id = b.sector_id
+ AND a.player_id < b.player_id
 GROUP BY a.game_id, a.player_id, b.player_id
 ORDER BY tics_juntos DESC;
-\end{minted}
+\end{lstlisting}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
-\begin{tabular}{llll}
-\hline
-game & player A & player B & tics together \\
-\hline
+\begin{tabular}{rrrr}
+\toprule
+\textbf{game} & \textbf{player A} & \textbf{player B} & \textbf{tics together} \\
+\midrule
 12 & 4 & 6 & 69 \\
 3 & 2 & 6 & 63 \\
 4 & 3 & 4 & 60 \\
-\hline
+\bottomrule
 \end{tabular}
-\caption{Top co-presence results in the same sector}
+\caption{Top co-presence results in the same sector.}
 \end{table}
 
-\section{Indexing and Performance Evaluation}
+\textbf{Interpretation.} Co-presence measurements estimate how often players occupy the same sector simultaneously. High values may indicate collaboration, escort behavior, or repeated encounters.
 
+\section{Indexing and performance evaluation}
 \subsection{Important observation before indexing}
-
-The schema already creates implicit B-tree indexes for primary keys and unique constraints. In particular, the constraint \texttt{uq\_telem(game\_id, player\_id, tic)} automatically creates an index over those columns.
-
-Therefore, creating another index with the same columns would be redundant. The following indexes were selected to complement the existing ones.
+The schema already creates implicit B-tree indexes for primary keys and unique constraints. In particular, \texttt{uq\_telem(game\_id, player\_id, tic)} already creates an index over those three columns. Therefore, creating another index with exactly the same columns would be redundant. The evaluated indexes were selected to complement the existing ones.
 
 \subsection{Created indexes}
+\textbf{Index 1: \texttt{idx\_telemetry\_game\_tic}.} \\
+\textbf{Purpose:} Accelerate proximity and co-presence queries that repeatedly filter telemetry by game and tic.
+\begin{lstlisting}[style=sqlstyle]
+CREATE INDEX idx_telemetry_game_tic ON TelemetryEvent(game_id, tic);
+\end{lstlisting}
 
-\begin{minted}{sql}
-CREATE INDEX idx_telemetry_game_tic 
-ON TelemetryEvent(game_id, tic);
+\textbf{Index 2: \texttt{idx\_telemetry\_sector}.} \\
+\textbf{Purpose:} Improve hotspot and sector-based analyses by avoiding full-table scans when filtering specific sectors.
+\begin{lstlisting}[style=sqlstyle]
+CREATE INDEX idx_telemetry_sector ON TelemetryEvent(sector_id);
+\end{lstlisting}
 
-CREATE INDEX idx_telemetry_sector 
-ON TelemetryEvent(sector_id);
-
-CREATE INDEX idx_game_player 
-ON Game(player_id);
-\end{minted}
+\textbf{Index 3: \texttt{idx\_game\_player}.} \\
+\textbf{Purpose:} Speed up retrieval of all participations associated with a specific player.
+\begin{lstlisting}[style=sqlstyle]
+CREATE INDEX idx_game_player ON Game(player_id);
+\end{lstlisting}
 
 \subsection{Before/after evidence}
-
-\begin{center}
-\begin{tabular}{|l|l|l|l|}
-\hline
-\textbf{Index} & \textbf{Query} & \textbf{Buffers} & \textbf{Time / Plan} \\
-\hline
-idx\_telemetry\_sector & Filter by sector\_id = 655 & 493 → 3 & 2.07 ms → 0.069 ms (Seq → Index scan) \\
-\hline
-idx\_telemetry\_game\_tic & Query inside game\_id = 1 & 168 → 150 & 4.9 ms → 4.7 ms (slight improvement) \\
-\hline
-idx\_game\_player & Search player\_id = 3 & 1 → 1 & 0.02 ms → 0.02 ms (Seq scan remains) \\
-\hline
+\begin{table}[H]
+\centering
+\footnotesize
+\begin{tabular}{p{3.8cm}p{4.2cm}p{2.5cm}p{3.7cm}}
+\toprule
+\textbf{Index} & \textbf{Representative query} & \textbf{Buffers} & \textbf{Time / plan change} \\
+\midrule
+\texttt{idx\_telemetry\_sector} & Filter events with \texttt{sector\_id = 655}. & 493 $\rightarrow$ 3 & 2.07 ms $\rightarrow$ 0.069 ms; Seq Scan $\rightarrow$ Index Only Scan. \\
+\texttt{idx\_telemetry\_game\_tic} & Proximity inside \texttt{game\_id = 1}. & 168 $\rightarrow$ 150 & 4.9 ms $\rightarrow$ 4.7 ms; Bitmap scan becomes slightly narrower. \\
+\texttt{idx\_game\_player} & Search games for \texttt{player\_id = 3}. & 1 $\rightarrow$ 1 & About 0.02 ms $\rightarrow$ 0.02 ms; Seq Scan remains cheaper at 28 rows. \\
+\bottomrule
 \end{tabular}
-\end{center}
+\caption{Index evaluation using \texttt{EXPLAIN (ANALYZE, BUFFERS)}.}
+\end{table}
 
 \subsection{Discussion}
+\textbf{Sector index.} The strongest improvement came from \texttt{idx\_telemetry\_sector}. The filtered sector query changed from a sequential scan over the full telemetry table to an index-only scan. Buffer usage dropped from 493 to 3, and execution time dropped from approximately 2.07 ms to 0.069 ms. This index is especially useful for selective sector queries and co-presence analyses.
 
-\textbf{Sector index.} The strongest improvement was observed with the index \texttt{idx\_telemetry\_sector}. The query changed from a sequential scan over the entire table to an index scan. Buffer usage decreased significantly (from 493 to 3), and execution time improved from approximately 2.07 ms to 0.069 ms. This index is especially useful for filtering by sector and spatial analysis.
+\textbf{Game/tic index.} The index \texttt{idx\_telemetry\_game\_tic} had only a marginal improvement in the tested dataset because the unique constraint \texttt{uq\_telem(game\_id, player\_id, tic)} already starts with \texttt{game\_id}. The new index is narrower and slightly reduces buffers, but the difference is small at 34,500 rows.
 
-\medskip
-
-\textbf{Game/tic index.} The index \texttt{idx\_telemetry\_game\_tic} showed only a small improvement. This is because the existing unique constraint \texttt{uq\_telem} already partially covers this access pattern. As a result, the impact is limited in the current dataset.
-
-\medskip
-
-\textbf{Player index on Game.} The index \texttt{idx\_game\_player} did not improve performance significantly because the \texttt{Game} table is small (only around 28 rows). PostgreSQL correctly uses a sequential scan in this case. However, this index is important for scalability and will be beneficial as the dataset grows.
-
-\section{Reproducibility mechanism}
-
-The system can be rebuilt using a Makefile. The scripts must be executed in a safe order: schema creation first, then UX metadata, master data, telemetry ingestion, and finally views and indexes.
-
-\begin{minted}{make}
-DB_NAME=chocolate_doom
-DB_USER=postgres
-PORT=5433
-
-reset:
-	psql -U $(DB_USER) -p $(PORT) -c "DROP DATABASE IF EXISTS $(DB_NAME);"
-	psql -U $(DB_USER) -p $(PORT) -c "CREATE DATABASE $(DB_NAME);"
-
-load: reset
-	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f ddl_corregido.sql
-	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f parte_3_puntoB_corregido.sql
-	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f populate_core.sql
-	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f parte2_puntoB.sql
-	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f C3_Views.sql
-	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f consultas_analiticas.sql
-	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -f indices_evaluacion.sql
-
-refresh:
-	psql -U $(DB_USER) -p $(PORT) -d $(DB_NAME) -c 
-	"REFRESH MATERIALIZED VIEW player_telemetry_summary;"
-\end{minted}
-
-
+\textbf{Player index on Game.} The index \texttt{idx\_game\_player} is justified by scalability. With only 28 rows in \texttt{Game}, PostgreSQL correctly chooses a sequential scan because it is cheaper than using the index. However, forcing \texttt{enable\_seqscan = off} confirms that the index is usable, and it will become more valuable as the number of game participations grows.
 \clearpage
-\section{C.4 Reproducibility / Makefile}
+
+\section{C.4 Reproducibility mechanism - Makefile}
 
 To ensure full reproducibility of the database, we provide a \texttt{Makefile} that automates the process of resetting and rebuilding the entire system from scratch. This guarantees that the database can be recreated consistently using only the SQL scripts included in the repository.
 
 \subsection{Makefile}
 
-\begin{minted}{make}
+\lstset{
+    breaklines=true,
+    basicstyle=\ttfamily\small
+}
+
+\begin{lstlisting}
 DB_NAME=chocolate_doom
 DB_USER=postgres
 
@@ -1136,9 +1021,12 @@ reset:
 
 load: reset
 	psql -U $(DB_USER) -d $(DB_NAME) -f "DDL proyecto(1).sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -c "\copy TelemetryEvent(game_id, player_id, sector_id, tic, pos_x, pos_y, mom_x, mom_y, angle, fov, health, armor, ammo) FROM 'telemetry.tsv' WITH (FORMAT csv, DELIMITER E'\t', HEADER true);"
 	psql -U $(DB_USER) -d $(DB_NAME) -f "C3_Views.sql"
 	psql -U $(DB_USER) -d $(DB_NAME) -f "parte2_puntoB.sql"
 	psql -U $(DB_USER) -d $(DB_NAME) -f "parte_3_puntoB.sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -f "consultas_analiticas.sql"
+	psql -U $(DB_USER) -d $(DB_NAME) -f "indices_evaluacion.sql"
 
 views:
 	psql -U $(DB_USER) -d $(DB_NAME) -f "C3_Views.sql"
@@ -1146,49 +1034,71 @@ views:
 refresh:
 	psql -U $(DB_USER) -d $(DB_NAME) -c "REFRESH MATERIALIZED VIEW player_telemetry_summary;"
 
+analytics:
+	psql -U $(DB_USER) -d $(DB_NAME) -f "consultas_analiticas.sql"
+
+indexes:
+	psql -U $(DB_USER) -d $(DB_NAME) -f "indices_evaluacion.sql"
+
 test:
 	psql -U $(DB_USER) -d $(DB_NAME) -c "SELECT * FROM player_game_summary LIMIT 5;"
 	psql -U $(DB_USER) -d $(DB_NAME) -c "SELECT * FROM map_activity_summary LIMIT 5;"
-\end{minted}
+\end{lstlisting}
 
 \subsection{Explanation of Makefile targets}
 
 \begin{itemize}
+
     \item \textbf{reset: }  
+    This target completely reinitializes the database environment. It first drops the existing database (if it exists) and then creates a fresh empty instance. This guarantees that every execution starts from a clean and consistent state, avoiding residual data or schema conflicts from previous runs.
 
-Drops the existing database (if it exists) and creates a fresh empty database. This ensures a clean starting point for reproducibility.
+    \medskip
 
-\medskip
     \item \textbf{load: }  
+    This is the main orchestration target responsible for fully rebuilding the system from scratch. It first executes \texttt{reset} and then runs all required scripts in a strict dependency order to ensure correctness and referential integrity:
+    
+    \begin{itemize}
+        \item The \textbf{DDL script}, which defines the complete database schema (tables, constraints, and relationships).
+        \item The \textbf{TSV ingestion step}, which loads raw telemetry data into the \texttt{TelemetryEvent} table using PostgreSQL's \texttt{\textbackslash copy} mechanism.
+        \item The \textbf{C.3 views script}, which creates analytical views and materialized views used for reporting and aggregation.
+        \item The \textbf{application logic scripts} (Part 2 and Part 3), which may include additional transformations, constraints, or data processing logic.
+        \item The \textbf{analytical queries script}, which defines complex queries used for evaluation and insights extraction.
+        \item The \textbf{index evaluation script}, which creates and tests indexes to improve query performance and demonstrates optimization effects.
+    \end{itemize}
 
-Fully rebuilds the database from scratch. It first calls \texttt{reset}, then executes all SQL scripts in the correct order:
-\begin{itemize}
-    \item DDL script (schema creation)
-    \item Views and materialized view definitions (C.3)
-    \item ETL ingestion process (Part 2)
-    \item UX survey data insertion (Part 3)
-\end{itemize}
+    This strict ordering ensures that each layer of the system is built on top of a correctly initialized foundation.
 
-\medskip
-    \item \textbf{views :}  
+    \medskip
 
-Creates only the SQL views and materialized views defined in C.3 without resetting the database. Useful for updating analytical structures independently.
+    \item \textbf{views: }  
+    Recreates only the database views and materialized views defined in the C.3 section without resetting or modifying the underlying data. This is useful when the schema and data already exist but the analytical layer needs to be refreshed or updated.
 
-\medskip
-    \item \textbf{refresh :}  
+    \medskip
 
-Refreshes the materialized view \texttt{player\_telemetry\_summary}, recomputing aggregated telemetry statistics after new data is inserted.
+    \item \textbf{refresh: }  
+    Recomputes the materialized view \texttt{player\_telemetry\_summary}. This operation updates precomputed aggregated telemetry results, ensuring that analytical outputs reflect the most recent underlying data.
 
-\medskip
-    \item \textbf{test :}  
+    \medskip
 
-Runs sample validation queries to quickly check that the database was built correctly and that the main analytical views return results.
+    \item \textbf{analytics: }  
+    Executes the full set of analytical SQL queries defined in \texttt{consultas\_analiticas.sql}. These queries are used to extract insights from the dataset and validate the correctness of the schema and data relationships.
+
+    \medskip
+
+    \item \textbf{indexes: }  
+    Executes the index creation and evaluation script defined in \texttt{indices\_evaluacion.sql}. This target is used to measure and demonstrate query performance improvements through indexing strategies.
+
+    \medskip
+
+    \item \textbf{test: }  
+    Runs a set of lightweight validation queries over key views. These queries provide a quick sanity check to verify that the database has been correctly built and that the main analytical views are returning expected results.
 
 \end{itemize}
 \subsection{Purpose}
 
 This automation allows the database to be fully rebuilt with a single command, without manual steps. It ensures that the setup process is consistent and repeatable, reduces the risk of errors, and makes it easier to reproduce the system in different environments.
 
+\clearpage
 \section{Conclusions}
 \medskip In this project, we designed and implemented a relational database to store gameplay telemetry together with user information and UX survey data. The schema follows a structured approach that separates core entities such as users, games, telemetry events, and survey responses, making the system organized and scalable.
 
@@ -1199,5 +1109,16 @@ This automation allows the database to be fully rebuilt with a single command, w
 \medskip Additionally, the use of primary keys, foreign keys, and indexes helps maintain data integrity and improves performance when running analytical queries. This is important because telemetry data grows very fast and queries need to be efficient. Views and materialized views were also implemented to simplify queries and improve performance for frequent analyses.
 
 \medskip Overall, this project shows how a relational database can be used not only to store large amounts of data, but also to support meaningful analysis of gameplay behavior and user experience through real telemetry data and analytical queries.
+
+\appendix
+\section{Delivered SQL files}
+\begin{itemize}
+    \item \texttt{ddl\_corregido.sql}: corrected PostgreSQL schema.
+    \item \texttt{parte\_3\_puntoB\_corregido.sql}: UX instrument metadata.
+    \item \texttt{populate\_core.sql}: master data and synthetic UX responses.
+    \item \texttt{consultas\_analiticas.sql}: six analytical queries.
+    \item \texttt{indices\_evaluacion.sql}: index creation and before/after evaluation.
+    \item \texttt{evidencia\_explain\_analyze.txt}: raw execution-plan evidence.
+\end{itemize}
 
 \end{document}
