@@ -36,20 +36,26 @@ CREATE TABLE Sector (
 );
 
 -- 6. Game
+-- game_id identifica una sesion compartida; varios jugadores participan
+-- en la misma sesion, por eso la PK es (game_id, player_id).
 CREATE TABLE Game (
-    game_id SERIAL PRIMARY KEY,
-    player_id INTEGER REFERENCES Player(player_id) ON DELETE CASCADE,
-    map_id INTEGER REFERENCES Map(map_id) ON DELETE CASCADE,
+    game_id   INTEGER NOT NULL,
+    player_id INTEGER NOT NULL REFERENCES Player(player_id) ON DELETE CASCADE,
+    map_id    INTEGER REFERENCES Map(map_id) ON DELETE CASCADE,
     start_time TIMESTAMP NOT NULL,
-    end_time TIMESTAMP
+    end_time   TIMESTAMP,
+    PRIMARY KEY (game_id, player_id)
 );
+
+-- Secuencia separada para generar nuevos game_id
+CREATE SEQUENCE game_game_id_seq START 1;
 
 -- 7. TelemetryEvent
 CREATE TABLE TelemetryEvent (
     event_id BIGSERIAL PRIMARY KEY,
-    game_id INTEGER REFERENCES Game(game_id) ON DELETE CASCADE,
-    player_id INTEGER REFERENCES Player(player_id) ON DELETE CASCADE,
-    sector_id INTEGER REFERENCES Sector(sector_id) ON DELETE SET NULL,
+    game_id   INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    sector_id INTEGER,  -- ID del sector en el mapa (no FK; los IDs del motor Doom no son secuenciales)
     tic INTEGER NOT NULL,
     pos_x DOUBLE PRECISION NOT NULL,
     pos_y DOUBLE PRECISION NOT NULL,
@@ -60,7 +66,9 @@ CREATE TABLE TelemetryEvent (
     health INTEGER,
     armor INTEGER,
     ammo INTEGER,
-    CONSTRAINT uq_telem UNIQUE (game_id, player_id, tic)
+    CONSTRAINT uq_telem UNIQUE (game_id, player_id, tic),
+    CONSTRAINT fk_telem_game FOREIGN KEY (game_id, player_id)
+        REFERENCES Game(game_id, player_id) ON DELETE CASCADE
 );
 
 -- 8. UXInstrument
